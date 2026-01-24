@@ -1,0 +1,289 @@
+'use client'
+
+import { useState, useRef, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
+
+interface RecorderDockProps {
+  isActive: boolean
+  conversationId: string | null | undefined
+  receiverId: string | null | undefined
+  onSent: () => void
+  onRecordingStart?: () => void
+}
+
+export default function RecorderDock({
+  isActive,
+  conversationId,
+  receiverId,
+  onSent,
+  onRecordingStart,
+}: RecorderDockProps) {
+  const { data: session } = useSession()
+  const [isRecording, setIsRecording] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [recordingDuration, setRecordingDuration] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
+  const recordingStartTimeRef = useRef<number | null>(null)
+  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  const startRecording = async () => {
+    if (!receiverId || isRecording) return
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+
+      // Try to use the best available mime type
+      let mimeType = 'audio/webm'
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus'
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm'
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4'
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType,
+      })
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+
+      mediaRecorder.onstop = async () => {
+        const blobType = mediaRecorder.mimeType || 'audio/webm'
+        const audioBlob = new Blob(audioChunksRef.current, { type: blobType })
+        await uploadAndSendMessage(audioBlob)
+        
+        // Stop all tracks
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop())
+          streamRef.current = null
+        }
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+      setRecordingDuration(0)
+      recordingStartTimeRef.current = Date.now()
+
+      // Notify parent that recording has started (to stop playback)
+      onRecordingStart?.()
+
+      // Start duration counter
+      durationIntervalRef.current = setInterval(() => {
+        if (recordingStartTimeRef.current) {
+          const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000)
+          setRecordingDuration(elapsed)
+        }
+      }, 100) // Update every 100ms for smooth display
+
+      if (navigator.vibrate) {
+        navigator.vibrate(10)
+      }
+    } catch (error) {
+      console.error('Error starting recording:', error)
+      alert('Failed to access microphone. Please check permissions.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      
+      // Clear duration interval
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current)
+        durationIntervalRef.current = null
+      }
+      recordingStartTimeRef.current = null
+      setRecordingDuration(0)
+    }
+  }
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      // Remove the onstop handler to prevent sending the message
+      mediaRecorderRef.current.onstop = null
+      
+      // Stop the recorder
+      if (mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+      }
+      
+      setIsRecording(false)
+      
+      // Clear duration interval
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current)
+        durationIntervalRef.current = null
+      }
+      recordingStartTimeRef.current = null
+      setRecordingDuration(0)
+      
+      // Stop all tracks and clean up
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+        streamRef.current = null
+      }
+      
+      // Clear audio chunks
+      audioChunksRef.current = []
+      mediaRecorderRef.current = null
+    }
+  }
+
+  const handleToggleRecording = (e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent event from bubbling to feed click handler
+    if (isRecording) {
+      stopRecording()
+    } else {
+      startRecording()
+    }
+  }
+
+  const uploadAndSendMessage = async (audioBlob: Blob) => {
+    if (!receiverId) return
+
+    try {
+      // Upload audio file
+      const formData = new FormData()
+      const extension = audioBlob.type.includes('mp4') ? 'm4a' : 'webm'
+      formData.append('file', audioBlob, `recording.${extension}`)
+
+      const uploadResponse = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!uploadResponse.ok) {
+        throw new Error('Upload failed')
+      }
+
+      const { audioUrl } = await uploadResponse.json()
+
+      // Get audio duration (approximate)
+      const audio = new Audio(audioUrl)
+      const duration = await new Promise<number>((resolve) => {
+        audio.addEventListener('loadedmetadata', () => {
+          resolve(Math.floor(audio.duration))
+        })
+        audio.addEventListener('error', () => {
+          resolve(10) // Default duration if can't load
+        })
+      })
+
+      // Create message
+      const messageResponse = await fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          audioUrl,
+          duration,
+          conversationId,
+          receiverId,
+        }),
+      })
+
+      if (!messageResponse.ok) {
+        throw new Error('Failed to send message')
+      }
+
+      setShowSuccess(true)
+      setTimeout(() => {
+        setShowSuccess(false)
+        onSent()
+      }, 2000)
+    } catch (error) {
+      console.error('Error sending message:', error)
+      alert('Failed to send message. Please try again.')
+    }
+  }
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // Cancel recording when component becomes inactive (user clicked away)
+  useEffect(() => {
+    if (!isActive && isRecording) {
+      // Remove the onstop handler to prevent sending the message
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.onstop = null
+        
+        // Stop the recorder
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop()
+        }
+        mediaRecorderRef.current = null
+      }
+      
+      setIsRecording(false)
+      
+      // Clear duration interval
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current)
+        durationIntervalRef.current = null
+      }
+      recordingStartTimeRef.current = null
+      setRecordingDuration(0)
+      
+      // Stop all tracks and clean up
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+        streamRef.current = null
+      }
+      
+      // Clear audio chunks
+      audioChunksRef.current = []
+    }
+  }, [isActive, isRecording])
+
+  useEffect(() => {
+    return () => {
+      // Cleanup on unmount
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+      }
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current)
+      }
+    }
+  }, [])
+
+  if (!isActive) {
+    return null
+  }
+
+  return (
+    <section 
+      className={`recorder-dock friends-recorder-dock ${isActive ? 'active' : ''}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        className={`record-trigger ${isRecording ? 'recording' : ''}`}
+        onClick={handleToggleRecording}
+      >
+        <div className="record-icon"></div>
+      </div>
+      <div className="instruction">
+        {isRecording ? formatDuration(recordingDuration) : 'Tap to record'}
+      </div>
+      {showSuccess && (
+        <div className="record-success-message">SENT</div>
+      )}
+    </section>
+  )
+}
