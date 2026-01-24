@@ -123,18 +123,18 @@ npm run build
 
 1. Copy Nginx configuration:
    ```bash
-   sudo cp deploy/nginx.conf /etc/nginx/sites-available/voice-messaging-app
+   sudo cp deploy/nginx.conf /etc/nginx/sites-available/letters-app
    ```
 
 2. Edit the config:
    ```bash
-   sudo nano /etc/nginx/sites-available/voice-messaging-app
+   sudo nano /etc/nginx/sites-available/letters-app
    ```
    Replace `your-domain.com` with your actual domain.
 
 3. Enable the site:
    ```bash
-   sudo ln -s /etc/nginx/sites-available/voice-messaging-app /etc/nginx/sites-enabled/
+   sudo ln -s /etc/nginx/sites-available/letters-app /etc/nginx/sites-enabled/
    sudo nginx -t
    sudo systemctl restart nginx
    ```
@@ -159,8 +159,8 @@ sudo ufw enable
 ## Step 11: Create Uploads Directory
 
 ```bash
-mkdir -p /var/www/voice-messaging-app/public/voice-messages
-chmod 755 /var/www/voice-messaging-app/public/voice-messages
+mkdir -p /var/www/letters-app/public/voice-messages
+chmod 755 /var/www/letters-app/public/voice-messages
 ```
 
 ## Future Deployments
