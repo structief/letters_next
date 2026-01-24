@@ -10,7 +10,7 @@ echo "🔄 Pulling latest changes..."
 git pull origin main
 
 echo "📦 Installing dependencies..."
-npm ci
+npm install --no-audit --prefer-offline
 
 echo "🗄️  Running database migrations..."
 npx prisma generate
