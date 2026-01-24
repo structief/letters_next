@@ -1,26 +1,14 @@
 import { PrismaClient } from '@prisma/client'
-import { PrismaLibSql } from '@prisma/adapter-libsql'
+import { PrismaPg } from '@prisma/adapter-pg'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-// Use SQLite adapter for local development (when DATABASE_URL points to a file)
-// Use direct connection for PostgreSQL in production
-const databaseUrl = process.env.DATABASE_URL || 'file:./prisma/dev.db'
-const isPostgres = databaseUrl.startsWith('postgresql://')
+// Use PostgreSQL with pg adapter for both dev and production
+const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/voice_messaging'
+const adapter = new PrismaPg({ connectionString })
 
-let prismaClient: PrismaClient
-
-if (isPostgres) {
-  // PostgreSQL - use direct connection without adapter
-  prismaClient = new PrismaClient()
-} else {
-  // SQLite - use LibSQL adapter
-  const adapter = new PrismaLibSql({ url: databaseUrl })
-  prismaClient = new PrismaClient({ adapter })
-}
-
-export const prisma = globalForPrisma.prisma ?? prismaClient
+export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter } as any)
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma

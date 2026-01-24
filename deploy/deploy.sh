@@ -4,7 +4,7 @@
 
 set -e
 
-cd /var/www/voice-messaging-app
+cd /var/www/letters-app
 
 echo "🔄 Pulling latest changes..."
 git pull origin main
@@ -20,7 +20,7 @@ echo "🏗️  Building application..."
 npm run build
 
 echo "🔄 Restarting application..."
-pm2 restart voice-messaging-app || pm2 start pm2.config.js
+pm2 restart letters-app || pm2 start pm2.config.js
 
 echo "✅ Deployment complete!"
 pm2 status
