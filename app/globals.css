@@ -340,9 +340,8 @@ header {
 
 .progress-bar {
   display: flex;
-  gap: 2px;
+  gap: 3px;
   height: 2px;
-  background: rgba(0, 0, 0, 0.1);
   border-radius: 1px;
   overflow: hidden;
   cursor: pointer;
@@ -357,8 +356,22 @@ header {
   border-radius: 1px;
 }
 
+/* Sent messages have lighter background */
+.progress-segment.sent {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* Received messages have standard background */
+.progress-segment.received {
+  background: rgba(0, 0, 0, 0.15);
+}
+
 .progress-segment:hover {
   background: rgba(0, 0, 0, 0.25);
+}
+
+.progress-segment.sent:hover {
+  background: rgba(0, 0, 0, 0.18);
 }
 
 .progress-segment-fill {

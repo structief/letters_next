@@ -38,6 +38,10 @@ interface Message {
     id: string
     username: string
   }
+  receiver?: {
+    id: string
+    username: string
+  }
   createdAt: string
 }
 
@@ -68,7 +72,7 @@ export default function VoiceThread({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isAudioPlaying, setIsAudioPlaying] = useState(false)
   const [localIsRead, setLocalIsRead] = useState(conversation.lastMessage?.isRead ?? false)
-  const [friendMessages, setFriendMessages] = useState<Message[]>([])
+  const [allMessages, setAllMessages] = useState<Message[]>([])
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   let [totalDuration, setTotalDuration] = useState(0)
@@ -103,10 +107,9 @@ export default function VoiceThread({
     markedMessagesRef.current.add(messageId)
 
     try {
-      /*const response = await fetch(`/api/messages/${messageId}/read`, {
+      const response = await fetch(`/api/messages/${messageId}/read`, {
         method: 'POST',
-      })*/
-     const response = {ok: true}
+      })
       if (response.ok) {
         // Only update UI and notify parent when API call succeeds
         setLocalIsRead(true)
@@ -123,7 +126,7 @@ export default function VoiceThread({
     }
   }, [conversation.id, onMessageRead])
 
-  // Fetch all messages from friend when playing starts (single fetch for both friend messages and unread duration)
+  // Fetch all messages when playing starts
   useEffect(() => {
     if (isPlaying && conversation.lastMessage && conversation.id && session?.user?.id) {
       const fetchMessages = async () => {
@@ -132,18 +135,34 @@ export default function VoiceThread({
           if (response.ok) {
             const data = await response.json()
             
-            // Filter to only messages from the friend (not from current user)
-            const messages = data.messages.filter((msg: Message) => msg.senderId !== session.user.id)
-            setFriendMessages(messages)
-            setCurrentMessageIndex(0)
-            setCurrentTime(0)
+            // Use all messages (both sent and received)
+            const messages = data.messages
+            setAllMessages(messages)
             
-            // Calculate total duration from friend messages
+            // Find first unread message index, or start at the beginning
+            const firstUnreadIndex = data.firstUnreadMessageId 
+              ? messages.findIndex((msg: Message) => msg.id === data.firstUnreadMessageId)
+              : -1
+            
+            // If all messages are read or there are no messages, start at the last one
+            const startIndex = firstUnreadIndex >= 0 
+              ? firstUnreadIndex 
+              : Math.max(0, messages.length - 1)
+            
+            setCurrentMessageIndex(startIndex)
+            
+            // Calculate elapsed time up to starting message
+            let elapsedTime = 0
+            for (let i = 0; i < startIndex; i++) {
+              elapsedTime += messages[i].duration
+            }
+            setCurrentTime(elapsedTime)
+            
+            // Calculate total duration from all messages
             if (messages.length > 0) {
               const total = messages.reduce((sum: number, msg: Message) => sum + msg.duration, 0)
               setTotalDuration(total)
             } else if (conversation.lastMessage) {
-              // No friend messages, use lastMessage duration
               setTotalDuration(conversation.lastMessage.duration)
             }
             
@@ -211,7 +230,7 @@ export default function VoiceThread({
         } catch (error) {
           console.error('Error fetching messages:', error)
           // On error, treat as single message
-          setFriendMessages([])
+          setAllMessages([])
           if (conversation.lastMessage) {
             setTotalDuration(conversation.lastMessage.duration)
           }
@@ -219,7 +238,7 @@ export default function VoiceThread({
       }
       fetchMessages()
     } else {
-      setFriendMessages([])
+      setAllMessages([])
       setCurrentMessageIndex(0)
       setCurrentTime(0)
       setTotalDuration(0)
@@ -274,10 +293,10 @@ export default function VoiceThread({
 
     // Determine which message to play
     let messageToPlay = conversation.lastMessage
-    if (friendMessages.length === 1) {
-      messageToPlay = friendMessages[0]
-    } else if (friendMessages.length > 1 && currentMessageIndex < friendMessages.length) {
-      messageToPlay = friendMessages[currentMessageIndex]
+    if (allMessages.length === 1) {
+      messageToPlay = allMessages[0]
+    } else if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+      messageToPlay = allMessages[currentMessageIndex]
     }
 
     // Check if message is loaded before playing
@@ -369,15 +388,15 @@ export default function VoiceThread({
     // Set up timer update interval
     const updateProgress = () => {
       if (audioRef.current && isPlaying) {
-        if (friendMessages.length <= 1) {
+        if (allMessages.length <= 1) {
           // Single message case
           setCurrentTime(audioRef.current.currentTime)
-        } else if (friendMessages.length > 1) {
+        } else if (allMessages.length > 1) {
           // Multiple messages case
           const current = audioRef.current.currentTime
           let totalElapsed = 0
           for (let i = 0; i < currentMessageIndex; i++) {
-            totalElapsed += friendMessages[i].duration
+            totalElapsed += allMessages[i].duration
           }
           totalElapsed += current
           setCurrentTime(totalElapsed)
@@ -392,7 +411,7 @@ export default function VoiceThread({
         clearInterval(progressIntervalRef.current)
       }
     }
-  }, [isPlaying, pauseAudio, friendMessages, currentMessageIndex, conversation.lastMessage, session?.user?.id, markAsRead, loadedMessages])
+  }, [isPlaying, pauseAudio, allMessages, currentMessageIndex, conversation.lastMessage, session?.user?.id, markAsRead, loadedMessages])
 
   // Handle stopping playback
   useEffect(() => {
@@ -411,13 +430,13 @@ export default function VoiceThread({
       // Only mark as read if playback had actually started (not on initial mount)
       if (hasStartedPlayingRef.current) {
         // Mark current playing message as read when user stops listening (taps away)
-        if (friendMessages.length > 0 && currentMessageIndex < friendMessages.length) {
-          const currentMessage = friendMessages[currentMessageIndex]
+        if (allMessages.length > 0 && currentMessageIndex < allMessages.length) {
+          const currentMessage = allMessages[currentMessageIndex]
           if (!currentMessage.isRead && currentMessage.senderId !== session?.user?.id) {
             markAsRead(currentMessage.id)
           }
         } else if (conversation.lastMessage && !localIsRead && conversation.lastMessage.senderId !== session?.user?.id) {
-          // Fallback to last message if no friend messages loaded yet
+          // Fallback to last message if no messages loaded yet
           markAsRead(conversation.lastMessage.id)
         }
         hasStartedPlayingRef.current = false
@@ -425,7 +444,7 @@ export default function VoiceThread({
       
       setCurrentTime(0)
     }
-  }, [isPlaying, friendMessages, currentMessageIndex, conversation.lastMessage, localIsRead, session?.user?.id, markAsRead])
+  }, [isPlaying, allMessages, currentMessageIndex, conversation.lastMessage, localIsRead, session?.user?.id, markAsRead])
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation() // Prevent triggering feed click handler
@@ -457,14 +476,14 @@ export default function VoiceThread({
 
   const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>, index: number) => {
     e.stopPropagation()
-    if (friendMessages.length === 0) return
+    if (allMessages.length === 0) return
     
     setCurrentMessageIndex(index)
     
     // Calculate total elapsed time up to this message
     let totalElapsed = 0
     for (let i = 0; i < index; i++) {
-      totalElapsed += friendMessages[i].duration
+      totalElapsed += allMessages[i].duration
     }
     setCurrentTime(totalElapsed)
     
@@ -475,7 +494,7 @@ export default function VoiceThread({
 
   const handleMessageEnd = () => {
     // Safety check: ensure we have a valid message
-    if (friendMessages.length === 0 || currentMessageIndex >= friendMessages.length) {
+    if (allMessages.length === 0 || currentMessageIndex >= allMessages.length) {
       // Single message case or edge case - stop playback and animation but keep screen visible
       setIsAudioPlaying(false)
       setHasFinishedPlaying(true)
@@ -496,7 +515,7 @@ export default function VoiceThread({
       return
     }
 
-    const currentMessage = friendMessages[currentMessageIndex]
+    const currentMessage = allMessages[currentMessageIndex]
     if (!currentMessage) {
       // Edge case - stop playback and animation but keep screen visible
       setIsAudioPlaying(false)
@@ -513,8 +532,8 @@ export default function VoiceThread({
       return
     }
 
-    if (currentMessageIndex < friendMessages.length - 1) {
-      // Mark current message as read
+    if (currentMessageIndex < allMessages.length - 1) {
+      // Mark current message as read if it's received
       if (!currentMessage.isRead && currentMessage.senderId !== session?.user?.id) {
         markAsRead(currentMessage.id)
       }
@@ -578,12 +597,24 @@ export default function VoiceThread({
   }
 
   const messageState = getMessageState()
-  const isMine = conversation.lastMessage?.senderId === session?.user?.id
+  
+  // Determine which message to display (currently playing or last message)
+  const displayMessage = isPlaying && allMessages.length > 0 && currentMessageIndex < allMessages.length
+    ? allMessages[currentMessageIndex]
+    : conversation.lastMessage
 
-  const previewText = conversation.lastMessage
+  const isMine = displayMessage?.senderId === session?.user?.id
+  
+  // When playing, update the display state based on current message
+  const displayState = isPlaying && displayMessage
+    ? (displayMessage.senderId === session?.user?.id ? 'mine' : 
+       (!displayMessage.isRead && 'receiverId' in displayMessage && displayMessage.receiverId === session?.user?.id ? 'new' : 'listened'))
+    : messageState
+
+  const previewText = displayMessage
     ? isMine 
       ? 'Voice message from you'
-      : `Voice message from ${conversation.lastMessage.sender.username}`
+      : `Voice message from ${displayMessage.sender.username}`
     : 'No messages yet'
 
   return (
@@ -603,7 +634,7 @@ export default function VoiceThread({
           onLoadedMetadata={() => {
             // Set total duration when audio loads
             if (audioRef.current && isPlaying && conversation.lastMessage) {
-              if (friendMessages.length <= 1) {
+              if (allMessages.length <= 1) {
                 const lastMsg = conversation.lastMessage
                 setTotalDuration(audioRef.current.duration || lastMsg.duration)
               }
@@ -612,15 +643,15 @@ export default function VoiceThread({
           onTimeUpdate={() => {
             // Backup timer update - ensures timer updates even if interval is delayed
             if (audioRef.current && isPlaying) {
-              if (friendMessages.length <= 1) {
+              if (allMessages.length <= 1) {
                 // Single message case
                 setCurrentTime(audioRef.current.currentTime)
-              } else if (friendMessages.length > 1 && currentMessageIndex < friendMessages.length) {
+              } else if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
                 // Multiple messages case
                 const current = audioRef.current.currentTime
                 let totalElapsed = 0
                 for (let i = 0; i < currentMessageIndex; i++) {
-                  totalElapsed += friendMessages[i].duration
+                  totalElapsed += allMessages[i].duration
                 }
                 totalElapsed += current
                 setCurrentTime(totalElapsed)
@@ -630,12 +661,12 @@ export default function VoiceThread({
         />
       )}
       <div className="user-info">
-        <div className={`avatar ${messageState === 'mine' ? 'mine-avatar' : ''}`}>
-          {messageState === 'new' && conversation.unreadCount > 0 && (
+        <div className={`avatar ${displayState === 'mine' ? 'mine-avatar' : ''}`}>
+          {displayState === 'new' && conversation.unreadCount > 0 && !isPlaying && (
             <div className="avatar-badge">{conversation.unreadCount}</div>
           )}
         </div>
-        <span className={`username ${messageState === 'mine' ? 'mine-username' : ''}`}>
+        <span className={`username ${displayState === 'mine' ? 'mine-username' : ''}`}>
           {isMine ? (
             <>You <span className="to-separator">to</span> {conversation.otherUser.username}</>
           ) : (
@@ -658,15 +689,15 @@ export default function VoiceThread({
                 />
               ))}
             </div>
-            <div className={`message-preview ${messageState === 'new' ? 'new-preview' : messageState === 'mine' ? 'mine-preview' : ''}`}>
+            <div className={`message-preview ${displayState === 'new' ? 'new-preview' : displayState === 'mine' ? 'mine-preview' : ''}`}>
               {previewText}
             </div>
           </div>
           {isPlaying && totalDuration > 0 && (
             <div className="progress-bar-container">
               <div className="progress-bar">
-                {(friendMessages.length > 0 ? friendMessages : conversation.lastMessage ? [conversation.lastMessage] : []).map((msg, index) => {
-                  const messagesToShow = friendMessages.length > 0 ? friendMessages : (conversation.lastMessage ? [conversation.lastMessage] : [])
+                {(allMessages.length > 0 ? allMessages : conversation.lastMessage ? [conversation.lastMessage] : []).map((msg, index) => {
+                  const messagesToShow = allMessages.length > 0 ? allMessages : (conversation.lastMessage ? [conversation.lastMessage] : [])
                   const messageCount = messagesToShow.length
                   
                   // Round totalDuration to 0 decimal places
@@ -694,13 +725,14 @@ export default function VoiceThread({
                   }
                   
                   const isLoading = loadingMessages.has(msg.id)
+                  const isMine = msg.senderId === session?.user?.id
                   
                   return (
                     <div
                       key={msg.id}
-                      className="progress-segment"
+                      className={`progress-segment ${isMine ? 'sent' : 'received'}`}
                       style={{ width: `${segmentWidth}%` }}
-                      onClick={(e) => friendMessages.length > 0 ? handleProgressBarClick(e, index) : undefined}
+                      onClick={(e) => allMessages.length > 0 ? handleProgressBarClick(e, index) : undefined}
                     >
                       {isLoading && (
                         <div className="progress-segment-loading" />

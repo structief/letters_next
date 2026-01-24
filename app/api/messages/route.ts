@@ -20,6 +20,7 @@ export async function GET(request: Request) {
       )
     }
 
+    // Get last 6 messages
     const messages = await prisma.message.findMany({
       where: {
         conversationId,
@@ -43,11 +44,23 @@ export async function GET(request: Request) {
         }
       },
       orderBy: {
-        createdAt: 'asc'
-      }
+        createdAt: 'desc'
+      },
+      take: 6
     })
 
-    return NextResponse.json({ messages })
+    // Reverse to get chronological order (oldest first)
+    const chronologicalMessages = messages.reverse()
+
+    // Find first unread message ID for the current user
+    const firstUnreadMessage = chronologicalMessages.find(
+      msg => msg.receiverId === session.user.id && !msg.isRead
+    )
+
+    return NextResponse.json({ 
+      messages: chronologicalMessages,
+      firstUnreadMessageId: firstUnreadMessage?.id || null
+    })
   } catch (error) {
     console.error('Error fetching messages:', error)
     return NextResponse.json(
