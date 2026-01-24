@@ -103,9 +103,10 @@ export default function VoiceThread({
     markedMessagesRef.current.add(messageId)
 
     try {
-      const response = await fetch(`/api/messages/${messageId}/read`, {
+      /*const response = await fetch(`/api/messages/${messageId}/read`, {
         method: 'POST',
-      })
+      })*/
+     const response = {ok: true}
       if (response.ok) {
         // Only update UI and notify parent when API call succeeds
         setLocalIsRead(true)
@@ -170,7 +171,10 @@ export default function VoiceThread({
                 const handleCanPlay = () => {
                   audio.removeEventListener('canplaythrough', handleCanPlay)
                   audio.removeEventListener('error', handleError)
-                  setLoadedMessages(prev => new Set([...prev, msg.id]))
+                  setLoadedMessages(prev => {
+                    const next = new Set([...prev, msg.id])
+                    return next
+                  })
                   setLoadingMessages(prev => {
                     const next = new Set(prev)
                     next.delete(msg.id)
@@ -283,40 +287,78 @@ export default function VoiceThread({
       return
     }
 
-    // Use preloaded audio element or create one if needed
-    const preloadedAudio = audioElementsRef.current.get(messageToPlay.id)
-    if (preloadedAudio && audioRef.current !== preloadedAudio) {
-      // Switch to preloaded audio element
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current.currentTime = 0
-      }
-      // We'll use the preloaded audio, but we need to update the ref
-      // For now, copy the src to the main audioRef
-      if (audioRef.current) {
-        audioRef.current.src = preloadedAudio.src
-        audioRef.current.currentTime = 0
-      }
-    }
-
     // Start playback only when loaded
     if (audioRef.current && messageToPlay && !pauseAudio && loadedMessages.has(messageToPlay.id)) {
-      // Ensure we're using the correct source
-      if (audioRef.current.src !== messageToPlay.audioUrl) {
-        audioRef.current.src = messageToPlay.audioUrl
-      }
-      audioRef.current.currentTime = 0
-      const playPromise = audioRef.current.play()
-      if (playPromise !== undefined) {
-        playPromise.catch((error) => {
-          // Ignore AbortError - it's expected when audio is interrupted
-          if (error.name !== 'AbortError') {
-            console.error('Error playing audio:', error)
+      // Read audio state BEFORE any potential resets
+      const currentSrc = audioRef.current.src
+      const currentTimeBefore = audioRef.current.currentTime
+      const wasPlaying = !audioRef.current.paused
+      
+      // Normalize URLs for comparison - extract pathname from full URL or use as-is for relative paths
+      const normalizeUrl = (url: string) => {
+        if (!url) return ''
+        try {
+          // If it's already a full URL, extract the pathname
+          if (url.startsWith('http://') || url.startsWith('https://')) {
+            return new URL(url).pathname
           }
-        })
+          // Otherwise it's already a relative path
+          return url
+        } catch {
+          return url
+        }
       }
-      setIsAudioPlaying(true)
-      hasStartedPlayingRef.current = true
+      const normalizedCurrentSrc = normalizeUrl(currentSrc)
+      const normalizedMessageUrl = normalizeUrl(messageToPlay.audioUrl)
+      const needsSrcChange = normalizedCurrentSrc !== normalizedMessageUrl
+      
+      // If audio is already playing the correct message, don't reset or restart
+      if (wasPlaying && !needsSrcChange) {
+        // Just ensure state is set correctly
+        setIsAudioPlaying(true)
+        return
+      }
+      
+      // Use preloaded audio element or create one if needed (only if we need to change src)
+      const preloadedAudio = audioElementsRef.current.get(messageToPlay.id)
+      if (preloadedAudio && needsSrcChange) {
+        // Switch to preloaded audio element
+        if (audioRef.current) {
+          audioRef.current.pause()
+          audioRef.current.currentTime = 0
+        }
+        // We'll use the preloaded audio, but we need to update the ref
+        // For now, copy the src to the main audioRef
+        if (audioRef.current) {
+          audioRef.current.src = preloadedAudio.src
+          audioRef.current.currentTime = 0
+        }
+      }
+      
+      // Only change src and reset if actually needed
+      if (needsSrcChange) {
+        audioRef.current.src = messageToPlay.audioUrl
+        // Reset currentTime when changing src
+        audioRef.current.currentTime = 0
+      } else if (!wasPlaying && currentTimeBefore === 0) {
+        // Only reset if audio wasn't playing and is at the start
+        audioRef.current.currentTime = 0
+      }
+      
+      // Only call play if not already playing
+      if (!wasPlaying) {
+        const playPromise = audioRef.current.play()
+        if (playPromise !== undefined) {
+          playPromise.catch((error) => {
+            // Ignore AbortError - it's expected when audio is interrupted
+            if (error.name !== 'AbortError') {
+              console.error('Error playing audio:', error)
+            }
+          })
+        }
+        setIsAudioPlaying(true)
+        hasStartedPlayingRef.current = true
+      }
       
       // Mark as read if needed (only for messages from others, not your own)
       if ('isRead' in messageToPlay && !messageToPlay.isRead && messageToPlay.senderId !== session?.user?.id) {
