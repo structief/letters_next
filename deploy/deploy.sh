@@ -10,7 +10,10 @@ echo "🔄 Pulling latest changes..."
 git pull origin main
 
 echo "📦 Installing dependencies..."
-npm install --no-audit --prefer-offline
+# Clear npm cache to free memory
+npm cache clean --force 2>/dev/null || true
+# Install with minimal memory footprint
+npm install --no-audit --prefer-offline --no-optional --legacy-peer-deps
 
 echo "🗄️  Running database migrations..."
 npx prisma generate
