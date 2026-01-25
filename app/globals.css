@@ -411,10 +411,23 @@ header {
   letter-spacing: 0.05em;
 }
 
-.waveform-container.playing .wave-bar {
+/* Active bars during playback - orange color moving from left to right */
+.wave-bar.active {
   background: var(--filament-accent);
   opacity: 1 !important;
   animation: vibrate 0.5s infinite ease-in-out alternate;
+}
+
+/* Loading bars - start at minimum height, animate to full height */
+.wave-bar.loading {
+  opacity: 0.3;
+  background: var(--filament-tension);
+}
+
+/* Backward compatibility - when container has playing class, all bars are active */
+.waveform-container.playing .wave-bar:not(.active) {
+  background: var(--filament-tension);
+  opacity: 0.15;
 }
 
 @keyframes vibrate {

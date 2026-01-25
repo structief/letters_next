@@ -85,6 +85,8 @@ export default function VoiceThread({
   const [loadedMessages, setLoadedMessages] = useState<Set<string>>(new Set())
   const [loadingMessages, setLoadingMessages] = useState<Set<string>>(new Set())
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const [waveformLoadingProgress, setWaveformLoadingProgress] = useState<number>(0) // 0-1, tracks loading progress for waveform bars
+  const loadingProgressIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Set waveform from stored data or generate fallback
   useEffect(() => {
@@ -182,6 +184,7 @@ export default function VoiceThread({
             const messagesToPreload = messages.length > 0 ? messages : (conversation.lastMessage ? [conversation.lastMessage] : [])
             setLoadingMessages(new Set(messagesToPreload.map((msg: Message) => msg.id)))
             setLoadedMessages(new Set())
+            setWaveformLoadingProgress(0) // Reset loading progress
             
             // Clean up old audio elements
             audioElementsRef.current.forEach((audio) => {
@@ -202,6 +205,7 @@ export default function VoiceThread({
                 const handleCanPlay = () => {
                   audio.removeEventListener('canplaythrough', handleCanPlay)
                   audio.removeEventListener('error', handleError)
+                  audio.removeEventListener('progress', handleProgress)
                   setLoadedMessages(prev => {
                     const next = new Set([...prev, msg.id])
                     return next
@@ -217,6 +221,7 @@ export default function VoiceThread({
                 const handleError = () => {
                   audio.removeEventListener('canplaythrough', handleCanPlay)
                   audio.removeEventListener('error', handleError)
+                  audio.removeEventListener('progress', handleProgress)
                   setLoadingMessages(prev => {
                     const next = new Set(prev)
                     next.delete(msg.id)
@@ -225,8 +230,21 @@ export default function VoiceThread({
                   reject(new Error(`Failed to load audio for message ${msg.id}`))
                 }
                 
+                const handleProgress = () => {
+                  // Update loading progress based on buffered ranges
+                  if (audio.buffered.length > 0) {
+                    const bufferedEnd = audio.buffered.end(audio.buffered.length - 1)
+                    const duration = audio.duration || msg.duration
+                    if (duration > 0) {
+                      const progress = Math.min(1, bufferedEnd / duration)
+                      setWaveformLoadingProgress(progress)
+                    }
+                  }
+                }
+                
                 audio.addEventListener('canplaythrough', handleCanPlay)
                 audio.addEventListener('error', handleError)
+                audio.addEventListener('progress', handleProgress)
                 
                 // Start loading
                 audio.load()
@@ -256,12 +274,18 @@ export default function VoiceThread({
       setTotalDuration(0)
       setLoadedMessages(new Set())
       setLoadingMessages(new Set())
+      setWaveformLoadingProgress(0)
       // Clean up audio elements
       audioElementsRef.current.forEach((audio) => {
         audio.pause()
         audio.src = ''
       })
       audioElementsRef.current.clear()
+      // Clean up loading progress interval
+      if (loadingProgressIntervalRef.current) {
+        clearInterval(loadingProgressIntervalRef.current)
+        loadingProgressIntervalRef.current = null
+      }
     }
   }, [isPlaying, conversation.id, conversation.lastMessage, session?.user?.id])
 
@@ -330,17 +354,20 @@ export default function VoiceThread({
       const handleCanPlay = () => {
         audio.removeEventListener('canplaythrough', handleCanPlay)
         audio.removeEventListener('error', handleError)
+        audio.removeEventListener('progress', handleProgress)
         setLoadedMessages(prev => new Set([...prev, messageToPlay.id]))
         setLoadingMessages(prev => {
           const next = new Set(prev)
           next.delete(messageToPlay.id)
           return next
         })
+        setWaveformLoadingProgress(1) // Fully loaded
       }
       
       const handleError = () => {
         audio.removeEventListener('canplaythrough', handleCanPlay)
         audio.removeEventListener('error', handleError)
+        audio.removeEventListener('progress', handleProgress)
         setLoadingMessages(prev => {
           const next = new Set(prev)
           next.delete(messageToPlay.id)
@@ -354,8 +381,21 @@ export default function VoiceThread({
         // Since playback works, we'll skip logging preload errors to avoid false positives.
       }
       
+      const handleProgress = () => {
+        // Update loading progress based on buffered ranges
+        if (audio.buffered.length > 0) {
+          const bufferedEnd = audio.buffered.end(audio.buffered.length - 1)
+          const duration = audio.duration || messageToPlay.duration
+          if (duration > 0) {
+            const progress = Math.min(1, bufferedEnd / duration)
+            setWaveformLoadingProgress(progress)
+          }
+        }
+      }
+      
       audio.addEventListener('canplaythrough', handleCanPlay)
       audio.addEventListener('error', handleError)
+      audio.addEventListener('progress', handleProgress)
       audio.load()
       
       // Wait a bit for it to load, but don't block indefinitely
@@ -363,14 +403,29 @@ export default function VoiceThread({
       return
     }
     
-    // If still loading, wait
+    // If still loading, wait and track loading progress
     if (loadingMessages.has(messageToPlay.id)) {
       setIsAudioPlaying(false)
+      // Track loading progress from preloaded audio element
+      const preloadedAudio = audioElementsRef.current.get(messageToPlay.id)
+      if (preloadedAudio) {
+        if (preloadedAudio.buffered.length > 0) {
+          const bufferedEnd = preloadedAudio.buffered.end(preloadedAudio.buffered.length - 1)
+          const duration = preloadedAudio.duration || messageToPlay.duration
+          if (duration > 0) {
+            const progress = Math.min(1, bufferedEnd / duration)
+            setWaveformLoadingProgress(progress)
+          }
+        }
+      }
       return
     }
 
     // Start playback only when loaded
     if (audioRef.current && messageToPlay && !pauseAudio && loadedMessages.has(messageToPlay.id)) {
+      // Message is loaded, set loading progress to 1
+      setWaveformLoadingProgress(1)
+      
       // Read audio state BEFORE any potential resets
       const currentSrc = audioRef.current.src
       const currentTimeBefore = audioRef.current.currentTime
@@ -399,6 +454,11 @@ export default function VoiceThread({
         // Just ensure state is set correctly
         setIsAudioPlaying(true)
         return
+      }
+      
+      // Reset loading progress when switching messages
+      if (needsSrcChange) {
+        setWaveformLoadingProgress(0)
       }
       
       // Use preloaded audio element or create one if needed (only if we need to change src)
@@ -737,6 +797,22 @@ export default function VoiceThread({
                   }
                 }
               }
+              // Mark as fully loaded
+              setWaveformLoadingProgress(1)
+            }
+          }}
+          onProgress={() => {
+            // Track loading progress for waveform animation
+            if (audioRef.current && isPlaying) {
+              const audio = audioRef.current
+              if (audio.buffered.length > 0) {
+                const bufferedEnd = audio.buffered.end(audio.buffered.length - 1)
+                const duration = audio.duration || displayMessage?.duration || 0
+                if (duration > 0) {
+                  const progress = Math.min(1, bufferedEnd / duration)
+                  setWaveformLoadingProgress(progress)
+                }
+              }
             }
           }}
           onError={(e) => {
@@ -794,16 +870,49 @@ export default function VoiceThread({
         <>
           <div className="waveform-wrapper">
             <div className={`waveform-container ${isPlaying && !pauseAudio && !hasFinishedPlaying ? 'playing' : ''}`}>
-              {waveform.map((height, i) => (
-                <div
-                  key={i}
-                  className="wave-bar"
-                  style={{
-                    height: `${height}px`,
-                    animationDelay: (isPlaying && !pauseAudio && !hasFinishedPlaying) ? `${i * 0.05}s` : '0s',
-                  }}
-                />
-              ))}
+              {waveform.map((height, i) => {
+                // Determine if this bar should be visible during loading
+                const totalBars = waveform.length
+                const loadingBarIndex = Math.ceil(waveformLoadingProgress * totalBars)
+                const isBarLoaded = i < loadingBarIndex
+                const isLoading = loadingMessages.has(displayMessage?.id || '')
+                
+                // Determine if this bar should be orange during playback
+                let isBarActive = false
+                if (isPlaying && !pauseAudio && !hasFinishedPlaying && displayMessage) {
+                  const messageDuration = displayMessage.duration || totalDuration
+                  if (messageDuration > 0) {
+                    // Calculate current playback position within the current message
+                    let currentMessageTime = currentTime
+                    if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+                      // For multiple messages, calculate time within current message
+                      let elapsedBeforeCurrent = 0
+                      for (let j = 0; j < currentMessageIndex; j++) {
+                        elapsedBeforeCurrent += allMessages[j].duration
+                      }
+                      currentMessageTime = currentTime - elapsedBeforeCurrent
+                    }
+                    const playbackProgress = Math.min(1, Math.max(0, currentMessageTime / messageDuration))
+                    const activeBarIndex = Math.floor(playbackProgress * totalBars)
+                    isBarActive = i <= activeBarIndex
+                  }
+                }
+                
+                return (
+                  <div
+                    key={i}
+                    className={`wave-bar ${isBarActive ? 'active' : ''} ${isLoading && !isBarLoaded ? 'loading' : ''}`}
+                    style={{
+                      height: isLoading && !isBarLoaded ? '5px' : `${height}px`,
+                      transition: isLoading && !isBarLoaded 
+                        ? `height 0.15s ease-out ${i * 0.02}s` 
+                        : isBarActive 
+                        ? 'background 0.1s ease, opacity 0.1s ease' 
+                        : 'all 0.3s ease',
+                    }}
+                  />
+                )
+              })}
             </div>
             <div className={`message-preview ${displayState === 'new' ? 'new-preview' : displayState === 'mine' ? 'mine-preview' : ''}`}>
               {previewText}
