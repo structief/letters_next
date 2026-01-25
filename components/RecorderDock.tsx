@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { generateWaveform } from '@/lib/waveform'
+import { transcribeAndSummarize } from '@/lib/transcription'
 
 interface RecorderDockProps {
   isActive: boolean
@@ -28,6 +29,7 @@ export default function RecorderDock({
   const streamRef = useRef<MediaStream | null>(null)
   const recordingStartTimeRef = useRef<number | null>(null)
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [isTranscribing, setIsTranscribing] = useState(false)
 
   const startRecording = async () => {
     if (!receiverId || isRecording) return
@@ -61,13 +63,15 @@ export default function RecorderDock({
       mediaRecorder.onstop = async () => {
         const blobType = mediaRecorder.mimeType || 'audio/webm'
         const audioBlob = new Blob(audioChunksRef.current, { type: blobType })
-        await uploadAndSendMessage(audioBlob)
         
         // Stop all tracks
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop())
           streamRef.current = null
         }
+        
+        // Transcribe and send message
+        await uploadAndSendMessage(audioBlob)
       }
 
       mediaRecorder.start()
@@ -222,6 +226,18 @@ export default function RecorderDock({
         })
       ])
 
+      // Transcribe and summarize audio
+      setIsTranscribing(true)
+      let summary = ''
+      try {
+        summary = await transcribeAndSummarize(audioBlob)
+      } catch (error) {
+        console.error('Error transcribing audio:', error)
+        // Continue without transcription if it fails
+      } finally {
+        setIsTranscribing(false)
+      }
+
       // Create message
       const messageResponse = await fetch('/api/messages', {
         method: 'POST',
@@ -232,6 +248,7 @@ export default function RecorderDock({
           audioUrl,
           duration,
           waveform: waveform.length > 0 ? waveform : undefined,
+          transcription: summary || undefined,
           conversationId,
           receiverId,
         }),
@@ -321,7 +338,11 @@ export default function RecorderDock({
         <div className="record-icon"></div>
       </div>
       <div className="instruction">
-        {isRecording ? formatDuration(recordingDuration) : 'Tap to record'}
+        {isTranscribing 
+          ? 'Transcribing...' 
+          : isRecording 
+          ? formatDuration(recordingDuration) 
+          : 'Tap to record'}
       </div>
       {showSuccess && (
         <div className="record-success-message">SENT</div>

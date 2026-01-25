@@ -13,16 +13,19 @@
   },
   "dependencies": {
     "@libsql/client": "^0.8.1",
+    "@mlc-ai/web-llm": "^0.2.80",
     "@prisma/adapter-libsql": "^7.3.0",
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^7.3.0",
     "@prisma/config": "^7.3.0",
+    "@xenova/transformers": "^2.17.2",
     "bcryptjs": "^2.4.3",
     "next": "^14.2.0",
     "next-auth": "^4.24.5",
     "pg": "^8.17.2",
     "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "react-dom": "^18.3.0",
+    "whisper-web-transcriber": "^0.2.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
