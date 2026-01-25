@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSession } from 'next-auth/react'
+import { showBrowserNotification } from '@/lib/notifications'
 
 interface TabNavigationProps {
   activeTab: string
@@ -12,6 +13,8 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
   const { data: session } = useSession()
   const [pendingRequests, setPendingRequests] = useState(0)
   const [unreadMessages, setUnreadMessages] = useState(0)
+  const previousCountsRef = useRef({ pendingRequests: 0, unreadMessages: 0 })
+  const isInitialLoadRef = useRef(true)
 
   const fetchCounts = useCallback(async () => {
     if (!session?.user?.id) return
@@ -19,8 +22,54 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
       const response = await fetch('/api/notifications/counts')
       if (response.ok) {
         const data = await response.json()
-        setPendingRequests(data.pendingRequests || 0)
-        setUnreadMessages(data.unreadMessages || 0)
+        const newPendingRequests = data.pendingRequests || 0
+        const newUnreadMessages = data.unreadMessages || 0
+        
+        // Only show notifications after initial load
+        if (!isInitialLoadRef.current) {
+          const prevPending = previousCountsRef.current.pendingRequests
+          const prevUnread = previousCountsRef.current.unreadMessages
+          
+          // Check for new friend requests
+          if (newPendingRequests > prevPending) {
+            const newRequestsCount = newPendingRequests - prevPending
+            const message = newRequestsCount === 1 
+              ? 'You have a new friend request' 
+              : `You have ${newRequestsCount} new friend requests`
+            
+            showBrowserNotification('New Friend Request', {
+              body: message,
+              tag: 'friend-request',
+              url: '/app?tab=orbit',
+              requireInteraction: false,
+            })
+          }
+          
+          // Check for new messages
+          if (newUnreadMessages > prevUnread) {
+            const newMessagesCount = newUnreadMessages - prevUnread
+            const message = newMessagesCount === 1 
+              ? 'You have a new message' 
+              : `You have ${newMessagesCount} new messages`
+            
+            showBrowserNotification('New Message', {
+              body: message,
+              tag: 'new-message',
+              url: '/app?tab=friends',
+              requireInteraction: false,
+            })
+          }
+        } else {
+          // Mark initial load as complete after first fetch
+          isInitialLoadRef.current = false
+        }
+        
+        setPendingRequests(newPendingRequests)
+        setUnreadMessages(newUnreadMessages)
+        previousCountsRef.current = {
+          pendingRequests: newPendingRequests,
+          unreadMessages: newUnreadMessages,
+        }
       }
     } catch (error) {
       console.error('Error fetching notification counts:', error)

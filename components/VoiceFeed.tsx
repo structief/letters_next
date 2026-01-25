@@ -7,6 +7,7 @@ import RecorderDock from './RecorderDock'
 import UserSearch from './UserSearch'
 import OrbitView from './OrbitView'
 import { useNotification } from '@/contexts/NotificationContext'
+import { showBrowserNotification } from '@/lib/notifications'
 
 interface Conversation {
   id: string | null
@@ -108,7 +109,34 @@ export default function VoiceFeed({ activeTab }: VoiceFeedProps) {
       const notificationMessage = changes.length === 1 
         ? changes[0] 
         : `${changes.length} updates`
+      
+      // Show in-app notification
       showNotification(notificationMessage, 'info')
+      
+      // Show browser notification (only for new messages, not for all changes)
+      const messageChanges = changes.filter(c => 
+        c.includes('New message from') || c.includes('unread message')
+      )
+      
+      if (messageChanges.length > 0) {
+        const browserNotificationMessage = messageChanges.length === 1
+          ? messageChanges[0]
+          : `${messageChanges.length} new messages`
+        
+        // Extract username from the first message change for better notification
+        const firstChange = messageChanges[0]
+        const usernameMatch = firstChange.match(/from (\w+)/)
+        const username = usernameMatch ? usernameMatch[1] : 'someone'
+        
+        showBrowserNotification('New Message', {
+          body: messageChanges.length === 1 
+            ? `New message from ${username}`
+            : `${messageChanges.length} new messages`,
+          tag: `message-${Date.now()}`, // Unique tag to allow multiple notifications
+          url: '/app?tab=friends',
+          requireInteraction: false,
+        })
+      }
     }
   }, [session?.user?.id, showNotification])
 

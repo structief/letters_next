@@ -6,6 +6,7 @@ import VoiceFeed from '@/components/VoiceFeed'
 import TabNavigation from '@/components/TabNavigation'
 import Header from '@/components/Header'
 import NotificationBar from '@/components/NotificationBar'
+import NotificationSetup from '@/components/NotificationSetup'
 import { NotificationContext } from '@/contexts/NotificationContext'
 
 export default function AppPage() {
@@ -42,6 +43,7 @@ export default function AppPage() {
 
   return (
     <NotificationContext.Provider value={{ showNotification }}>
+      <NotificationSetup />
       <div className="app-container">
         {notification && (
           <NotificationBar message={notification.message} type={notification.type} />
