@@ -48,6 +48,7 @@ model Message {
   id             String       @id @default(cuid())
   audioUrl       String
   duration       Int          // Duration in seconds
+  waveform       Json?        // Array of amplitude values for visualization
   transcription  String?      // Optional transcription
   senderId       String
   receiverId     String

@@ -14,6 +14,7 @@ interface Conversation {
     id: string
     audioUrl: string
     duration: number
+    waveform?: number[] | null
     senderId: string
     isRead: boolean
     sender: {
@@ -31,6 +32,7 @@ interface Message {
   id: string
   audioUrl: string
   duration: number
+  waveform?: number[] | null
   senderId: string
   receiverId?: string
   isRead: boolean
@@ -84,11 +86,21 @@ export default function VoiceThread({
   const [loadingMessages, setLoadingMessages] = useState<Set<string>>(new Set())
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
 
+  // Set waveform from stored data or generate fallback
   useEffect(() => {
-    // Generate random waveform
-    const bars = Array.from({ length: 40 }, () => Math.random() * 30 + 5)
-    setWaveform(bars)
-  }, [])
+    const messageToUse = isPlaying && allMessages.length > 0 && currentMessageIndex < allMessages.length
+      ? allMessages[currentMessageIndex]
+      : conversation.lastMessage
+
+    if (messageToUse?.waveform && Array.isArray(messageToUse.waveform) && messageToUse.waveform.length > 0) {
+      // Use stored waveform
+      setWaveform(messageToUse.waveform)
+    } else {
+      // Fallback to random waveform for backwards compatibility
+      const bars = Array.from({ length: 40 }, () => Math.random() * 30 + 5)
+      setWaveform(bars)
+    }
+  }, [conversation.lastMessage, allMessages, currentMessageIndex, isPlaying])
 
   // Sync local read state with conversation prop
   useEffect(() => {

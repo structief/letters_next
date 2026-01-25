@@ -77,7 +77,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { audioUrl, duration, conversationId, receiverId } = await request.json()
+    const { audioUrl, duration, waveform, conversationId, receiverId } = await request.json()
 
     if (!audioUrl || duration == null || !receiverId) {
       return NextResponse.json(
@@ -124,6 +124,7 @@ export async function POST(request: Request) {
       data: {
         audioUrl,
         duration,
+        waveform: waveform ? waveform : null,
         senderId: session.user.id,
         receiverId,
         conversationId: finalConversationId,

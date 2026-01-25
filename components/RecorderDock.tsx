@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
+import { generateWaveform } from '@/lib/waveform'
 
 interface RecorderDockProps {
   isActive: boolean
@@ -170,47 +171,56 @@ export default function RecorderDock({
 
       const { audioUrl } = await uploadResponse.json()
 
-      // Get audio duration from the blob directly (more reliable than loading from URL)
-      const duration = await new Promise<number>((resolve) => {
-        const audio = new Audio()
-        const blobUrl = URL.createObjectURL(audioBlob)
-        audio.src = blobUrl
-        
-        const cleanup = () => {
-          URL.revokeObjectURL(blobUrl)
-          audio.removeEventListener('loadedmetadata', handleLoaded)
-          audio.removeEventListener('error', handleError)
-        }
-        
-        const handleLoaded = () => {
-          const durationValue = Math.floor(audio.duration)
-          cleanup()
-          resolve(durationValue > 0 ? durationValue : 1) // Minimum 1 second
-        }
-        
-        const handleError = () => {
-          cleanup()
-          // Fallback: estimate duration from blob size (rough approximation)
-          // WebM/Opus is roughly 1KB per second at 32kbps
-          const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 1000))
-          resolve(estimatedDuration)
-        }
-        
-        audio.addEventListener('loadedmetadata', handleLoaded)
-        audio.addEventListener('error', handleError)
-        
-        // Start loading
-        audio.load()
-        
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          if (audio.readyState < 2) { // HAVE_CURRENT_DATA
+      // Get audio duration and generate waveform in parallel
+      const [duration, waveform] = await Promise.all([
+        // Get audio duration from the blob directly (more reliable than loading from URL)
+        new Promise<number>((resolve) => {
+          const audio = new Audio()
+          const blobUrl = URL.createObjectURL(audioBlob)
+          audio.src = blobUrl
+          
+          const cleanup = () => {
+            URL.revokeObjectURL(blobUrl)
+            audio.removeEventListener('loadedmetadata', handleLoaded)
+            audio.removeEventListener('error', handleError)
+          }
+          
+          const handleLoaded = () => {
+            const durationValue = Math.floor(audio.duration)
             cleanup()
+            resolve(durationValue > 0 ? durationValue : 1) // Minimum 1 second
+          }
+          
+          const handleError = () => {
+            cleanup()
+            // Fallback: estimate duration from blob size (rough approximation)
+            // WebM/Opus is roughly 1KB per second at 32kbps
             const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 1000))
             resolve(estimatedDuration)
           }
-        }, 5000)
-      })
+          
+          audio.addEventListener('loadedmetadata', handleLoaded)
+          audio.addEventListener('error', handleError)
+          
+          // Start loading
+          audio.load()
+          
+          // Timeout after 5 seconds
+          setTimeout(() => {
+            if (audio.readyState < 2) { // HAVE_CURRENT_DATA
+              cleanup()
+              const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 1000))
+              resolve(estimatedDuration)
+            }
+          }, 5000)
+        }),
+        // Generate waveform from audio blob
+        generateWaveform(audioBlob, 40).catch((error) => {
+          console.error('Error generating waveform:', error)
+          // Fallback to empty array if waveform generation fails
+          return []
+        })
+      ])
 
       // Create message
       const messageResponse = await fetch('/api/messages', {
@@ -221,6 +231,7 @@ export default function RecorderDock({
         body: JSON.stringify({
           audioUrl,
           duration,
+          waveform: waveform.length > 0 ? waveform : undefined,
           conversationId,
           receiverId,
         }),
