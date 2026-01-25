@@ -35,7 +35,6 @@ export const metadata: Metadata = {
       { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
     ],
   },
-  themeColor: "#ff4d00",
   other: {
     "mobile-web-app-capable": "yes",
   },
