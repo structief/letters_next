@@ -130,7 +130,7 @@ export default function OrbitView() {
 
   return (
     <div className="view-container active">
-      <div style={{ flex: 1, padding: '24px 32px', paddingBottom: '100px', display: 'flex', flexDirection: 'column', overflowY: 'auto', scrollbarWidth: 'none' } as React.CSSProperties}>
+      <div style={{ flex: 1, padding: '24px 32px', paddingBottom: `calc(100px + env(safe-area-inset-bottom, 0))`, display: 'flex', flexDirection: 'column', overflowY: 'auto', scrollbarWidth: 'none' } as React.CSSProperties}>
         {/* Search input */}
         <input
           type="text"
