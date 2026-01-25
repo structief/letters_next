@@ -105,10 +105,11 @@ export async function GET(request: Request) {
     // Filter out null values
     const filteredConversations = formattedConversations.filter((conv): conv is NonNullable<typeof conv> => conv !== null)
     
-    // Get all friends
+    // Get all accepted friends
     const friends = await prisma.friend.findMany({
       where: {
-        userId: session.user.id
+        userId: session.user.id,
+        status: 'accepted'
       },
       include: {
         friend: {

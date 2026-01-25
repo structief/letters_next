@@ -15,6 +15,16 @@ interface Friend {
   username: string
   email: string
   addedAt: string
+  status?: string
+}
+
+interface FriendRequest {
+  id: string
+  userId: string
+  username: string
+  email: string
+  requestedAt: string
+  status: string
 }
 
 export default function OrbitView() {
@@ -23,11 +33,18 @@ export default function OrbitView() {
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<User[]>([])
   const [friends, setFriends] = useState<Friend[]>([])
+  const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([])
+  const [sentRequests, setSentRequests] = useState<Friend[]>([])
   const [loading, setLoading] = useState(false)
   const [searching, setSearching] = useState(false)
 
   useEffect(() => {
     fetchFriends()
+    // Auto-refresh every minute
+    const interval = setInterval(() => {
+      fetchFriends()
+    }, 60000)
+    return () => clearInterval(interval)
   }, [])
 
   const fetchFriends = async () => {
@@ -37,6 +54,8 @@ export default function OrbitView() {
       if (response.ok) {
         const data = await response.json()
         setFriends(data.friends || [])
+        setPendingRequests(data.pendingRequests || [])
+        setSentRequests(data.sentRequests || [])
       }
     } catch (error) {
       console.error('Error fetching friends:', error)
@@ -84,14 +103,19 @@ export default function OrbitView() {
 
       if (response.ok) {
         const data = await response.json()
-        setFriends([data.friend, ...friends])
+        if (data.friend.status === 'accepted') {
+          setFriends([data.friend, ...friends])
+          showNotification(`Added ${data.friend.username}`, 'success')
+        } else {
+          setSentRequests([data.friend, ...sentRequests])
+          showNotification(`Friend request sent to ${data.friend.username}`, 'success')
+        }
         // Remove from search results
         setSearchResults(searchResults.filter(u => u.id !== userId))
         setSearchTerm('')
-        showNotification(`Added ${data.friend.username}`, 'success')
       } else {
         const error = await response.json()
-        showNotification(error.error || 'Failed to add friend', 'error')
+        showNotification(error.error || 'Failed to send friend request', 'error')
       }
     } catch (error) {
       console.error('Error adding friend:', error)
@@ -117,6 +141,38 @@ export default function OrbitView() {
     } catch (error) {
       console.error('Error removing friend:', error)
       showNotification('Failed to remove friend', 'error')
+    }
+  }
+
+  const handleRequestAction = async (requestId: string, action: 'accept' | 'decline', username: string) => {
+    try {
+      const response = await fetch(`/api/friends/${requestId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setPendingRequests(pendingRequests.filter(r => r.id !== requestId))
+        if (action === 'accept') {
+          // Refresh friends list to include the new friend
+          fetchFriends()
+          showNotification(`Accepted friend request from ${username}`, 'success')
+        } else {
+          showNotification(`Declined friend request from ${username}`, 'success')
+        }
+        // Trigger notification count refresh
+        window.dispatchEvent(new Event('refreshNotificationCounts'))
+      } else {
+        const error = await response.json()
+        showNotification(error.error || `Failed to ${action} friend request`, 'error')
+      }
+    } catch (error) {
+      console.error(`Error ${action}ing friend request:`, error)
+      showNotification(`Failed to ${action} friend request`, 'error')
     }
   }
 
@@ -162,6 +218,113 @@ export default function OrbitView() {
 
         {!loading && (
           <>
+            {/* Pending Requests Section */}
+            {pendingRequests.length > 0 && (
+              <div style={{ marginBottom: '32px' }}>
+                <div style={{ 
+                  fontFamily: 'var(--font-mono)', 
+                  fontSize: '9px', 
+                  textTransform: 'uppercase', 
+                  letterSpacing: '0.15em', 
+                  opacity: 0.4, 
+                  marginBottom: '16px' 
+                }}>
+                  Pending Requests ({pendingRequests.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  {pendingRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingBottom: '16px',
+                        transition: 'opacity 0.3s ease',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                          <div style={{ 
+                            width: '6px', 
+                            height: '6px', 
+                            borderRadius: '50%', 
+                            background: 'var(--filament-tension)',
+                            boxShadow: '0 0 0 3px var(--alabaster-depth)'
+                          }}></div>
+                          <div style={{ fontWeight: 500, fontSize: '14px', letterSpacing: '-0.01em' }}>{request.username}</div>
+                        </div>
+                        <div style={{ fontSize: '11px', opacity: '0.5', fontFamily: 'var(--font-mono)', textTransform: 'lowercase', paddingLeft: '14px' }}>{request.email}</div>
+                        <div style={{ fontSize: '9px', opacity: 0.4, marginTop: '4px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingLeft: '14px' }}>
+                          {new Date(request.requestedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', marginLeft: '16px', flexShrink: 0 }}>
+                        <button
+                          onClick={() => handleRequestAction(request.id, 'accept', request.username)}
+                          style={{
+                            padding: '6px 12px',
+                            background: 'transparent',
+                            color: 'var(--filament-accent)',
+                            border: '1px solid rgba(255, 77, 0, 0.3)',
+                            borderRadius: '2px',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '9px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.15em',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s var(--ease-out-expo)',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'var(--filament-accent)'
+                            e.currentTarget.style.color = 'white'
+                            e.currentTarget.style.borderColor = 'var(--filament-accent)'
+                            e.currentTarget.style.transform = 'scale(1.05)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent'
+                            e.currentTarget.style.color = 'var(--filament-accent)'
+                            e.currentTarget.style.borderColor = 'rgba(255, 77, 0, 0.3)'
+                            e.currentTarget.style.transform = 'scale(1)'
+                          }}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => handleRequestAction(request.id, 'decline', request.username)}
+                          style={{
+                            padding: '6px 12px',
+                            background: 'transparent',
+                            color: 'var(--filament-tension)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: '2px',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '9px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.15em',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s var(--ease-out-expo)',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'var(--filament-tension)'
+                            e.currentTarget.style.color = 'white'
+                            e.currentTarget.style.transform = 'scale(1.05)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent'
+                            e.currentTarget.style.color = 'var(--filament-tension)'
+                            e.currentTarget.style.transform = 'scale(1)'
+                          }}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Filtered Friends Section */}
             {filteredFriends.length > 0 && (
               <div style={{ marginBottom: searchResults.length > 0 ? '32px' : '0' }}>
@@ -323,8 +486,56 @@ export default function OrbitView() {
               </>
             )}
 
+            {/* Sent Requests Section */}
+            {!searchTerm && sentRequests.length > 0 && (
+              <div style={{ marginTop: pendingRequests.length > 0 ? '32px' : '0', marginBottom: filteredFriends.length > 0 ? '32px' : '0' }}>
+                <div style={{ 
+                  fontFamily: 'var(--font-mono)', 
+                  fontSize: '9px', 
+                  textTransform: 'uppercase', 
+                  letterSpacing: '0.15em', 
+                  opacity: 0.4, 
+                  marginBottom: '16px' 
+                }}>
+                  Sent Requests ({sentRequests.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  {sentRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingBottom: '16px',
+                        transition: 'opacity 0.3s ease',
+                        opacity: 0.6,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                          <div style={{ 
+                            width: '6px', 
+                            height: '6px', 
+                            borderRadius: '50%', 
+                            background: 'var(--filament-tension)',
+                            boxShadow: '0 0 0 3px var(--alabaster-depth)'
+                          }}></div>
+                          <div style={{ fontWeight: 500, fontSize: '14px', letterSpacing: '-0.01em' }}>{request.username}</div>
+                        </div>
+                        <div style={{ fontSize: '11px', opacity: '0.5', fontFamily: 'var(--font-mono)', textTransform: 'lowercase', paddingLeft: '14px' }}>{request.email}</div>
+                        <div style={{ fontSize: '9px', opacity: 0.4, marginTop: '4px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingLeft: '14px' }}>
+                          Pending
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Empty state when no search and no friends */}
-            {!searchTerm && friends.length === 0 && (
+            {!searchTerm && friends.length === 0 && pendingRequests.length === 0 && sentRequests.length === 0 && (
               <div style={{ textAlign: 'center', padding: '64px 32px', fontFamily: 'var(--font-mono)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.15em', opacity: 0.3 }}>
                 No friends yet. Search for users to add them.
               </div>

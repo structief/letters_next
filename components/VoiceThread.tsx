@@ -299,9 +299,55 @@ export default function VoiceThread({
       messageToPlay = allMessages[currentMessageIndex]
     }
 
-    // Check if message is loaded before playing
-    if (!messageToPlay || !loadedMessages.has(messageToPlay.id)) {
-      // Message not loaded yet, wait for it
+    // Check if message exists
+    if (!messageToPlay) {
+      setIsAudioPlaying(false)
+      return
+    }
+
+    // If message is not loaded yet, try to load it now (for newly sent messages)
+    if (!loadedMessages.has(messageToPlay.id) && !loadingMessages.has(messageToPlay.id)) {
+      // Start loading this message
+      setLoadingMessages(prev => new Set([...prev, messageToPlay.id]))
+      const audio = new Audio()
+      audio.preload = 'auto'
+      audio.src = messageToPlay.audioUrl
+      
+      audioElementsRef.current.set(messageToPlay.id, audio)
+      
+      const handleCanPlay = () => {
+        audio.removeEventListener('canplaythrough', handleCanPlay)
+        audio.removeEventListener('error', handleError)
+        setLoadedMessages(prev => new Set([...prev, messageToPlay.id]))
+        setLoadingMessages(prev => {
+          const next = new Set(prev)
+          next.delete(messageToPlay.id)
+          return next
+        })
+      }
+      
+      const handleError = () => {
+        audio.removeEventListener('canplaythrough', handleCanPlay)
+        audio.removeEventListener('error', handleError)
+        setLoadingMessages(prev => {
+          const next = new Set(prev)
+          next.delete(messageToPlay.id)
+          return next
+        })
+        console.error(`Failed to load audio for message ${messageToPlay.id}`)
+      }
+      
+      audio.addEventListener('canplaythrough', handleCanPlay)
+      audio.addEventListener('error', handleError)
+      audio.load()
+      
+      // Wait a bit for it to load, but don't block indefinitely
+      setIsAudioPlaying(false)
+      return
+    }
+    
+    // If still loading, wait
+    if (loadingMessages.has(messageToPlay.id)) {
       setIsAudioPlaying(false)
       return
     }
@@ -368,15 +414,32 @@ export default function VoiceThread({
       if (!wasPlaying) {
         const playPromise = audioRef.current.play()
         if (playPromise !== undefined) {
-          playPromise.catch((error) => {
-            // Ignore AbortError - it's expected when audio is interrupted
-            if (error.name !== 'AbortError') {
-              console.error('Error playing audio:', error)
-            }
-          })
+          playPromise
+            .then(() => {
+              // Audio started playing successfully
+              setIsAudioPlaying(true)
+              hasStartedPlayingRef.current = true
+            })
+            .catch((error) => {
+              // Ignore AbortError - it's expected when audio is interrupted
+              if (error.name !== 'AbortError') {
+                console.error('Error playing audio:', error, 'URL:', audioRef.current?.src)
+                setIsAudioPlaying(false)
+                // Try to get more info about the error
+                if (audioRef.current) {
+                  console.error('Audio element state:', {
+                    readyState: audioRef.current.readyState,
+                    networkState: audioRef.current.networkState,
+                    error: audioRef.current.error
+                  })
+                }
+              }
+            })
+        } else {
+          // If play() returns undefined (synchronous), assume it's playing
+          setIsAudioPlaying(true)
+          hasStartedPlayingRef.current = true
         }
-        setIsAudioPlaying(true)
-        hasStartedPlayingRef.current = true
       }
       
       // Mark as read if needed (only for messages from others, not your own)
@@ -632,11 +695,47 @@ export default function VoiceThread({
           preload="none"
           onEnded={handleMessageEnd}
           onLoadedMetadata={() => {
-            // Set total duration when audio loads
-            if (audioRef.current && isPlaying && conversation.lastMessage) {
-              if (allMessages.length <= 1) {
-                const lastMsg = conversation.lastMessage
-                setTotalDuration(audioRef.current.duration || lastMsg.duration)
+            // Set total duration when audio loads - use actual duration from audio element
+            if (audioRef.current && isPlaying) {
+              const actualDuration = audioRef.current.duration
+              // Use actual duration if available and valid
+              if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
+                if (allMessages.length <= 1) {
+                  // Single message - update total duration
+                  setTotalDuration(actualDuration)
+                } else if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+                  // Multiple messages - recalculate total with actual duration for current message
+                  const currentMsg = allMessages[currentMessageIndex]
+                  if (currentMsg) {
+                    // Update the current message's duration in our calculation
+                    let total = 0
+                    for (let i = 0; i < allMessages.length; i++) {
+                      if (i === currentMessageIndex) {
+                        total += actualDuration
+                      } else {
+                        total += allMessages[i].duration
+                      }
+                    }
+                    setTotalDuration(total)
+                  }
+                }
+              }
+            }
+          }}
+          onError={(e) => {
+            console.error('Audio playback error:', e, audioRef.current?.src)
+            // If audio fails to load, mark as not playing
+            setIsAudioPlaying(false)
+          }}
+          onCanPlay={() => {
+            // Ensure audio can actually play
+            if (audioRef.current && isPlaying && !pauseAudio) {
+              // Update duration from actual audio element if available
+              if (allMessages.length <= 1 && audioRef.current.duration) {
+                const actualDuration = audioRef.current.duration
+                if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
+                  setTotalDuration(actualDuration)
+                }
               }
             }
           }}

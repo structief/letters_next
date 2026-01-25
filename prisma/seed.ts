@@ -79,6 +79,15 @@ async function main() {
           data: {
             userId: testUser.id,
             friendId: friend.id,
+            status: 'accepted',
+          }
+        })
+        // Create reverse relationship
+        await prisma.friend.create({
+          data: {
+            userId: friend.id,
+            friendId: testUser.id,
+            status: 'accepted',
           }
         })
         console.log(`Added friend: ${friend.username}`)
@@ -89,7 +98,7 @@ async function main() {
   // Create conversations and messages
   console.log('Creating conversations and messages...')
   const friends = await prisma.friend.findMany({
-    where: { userId: testUser.id },
+    where: { userId: testUser.id, status: 'accepted' },
     include: { friend: true }
   })
 

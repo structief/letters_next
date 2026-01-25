@@ -301,6 +301,8 @@ export default function VoiceFeed({ activeTab }: VoiceFeedProps) {
       }
       return conv
     }))
+    // Trigger notification count refresh
+    window.dispatchEvent(new Event('refreshNotificationCounts'))
   }
 
   if (activeTab === 'orbit') {

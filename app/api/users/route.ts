@@ -13,10 +13,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search')
 
-    // Get list of friend IDs
+    // Get list of friend IDs (accepted friends)
     const friends = await prisma.friend.findMany({
       where: {
-        userId: session.user.id
+        userId: session.user.id,
+        status: 'accepted'
       },
       select: {
         friendId: true
@@ -24,11 +25,33 @@ export async function GET(request: Request) {
     })
     const friendIds = friends.map(f => f.friendId)
 
+    // Get list of user IDs with pending requests (sent or received)
+    const pendingRequests = await prisma.friend.findMany({
+      where: {
+        OR: [
+          { userId: session.user.id, status: 'pending' },
+          { friendId: session.user.id, status: 'pending' }
+        ]
+      },
+      select: {
+        userId: true,
+        friendId: true
+      }
+    })
+    const pendingUserIds = new Set<string>()
+    pendingRequests.forEach(r => {
+      if (r.userId === session.user.id) {
+        pendingUserIds.add(r.friendId)
+      } else {
+        pendingUserIds.add(r.userId)
+      }
+    })
+
     const users = await prisma.user.findMany({
       where: {
         id: {
           not: session.user.id,
-          notIn: friendIds // Exclude users who are already friends
+          notIn: [...friendIds, ...Array.from(pendingUserIds)] // Exclude users who are already friends or have pending requests
         },
         ...(search && {
           username: {

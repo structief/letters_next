@@ -732,6 +732,28 @@ header {
   width: 20px;
 }
 
+.tab-badge {
+  position: absolute;
+  top: 7px;
+  right: -10px;
+  background: var(--filament-accent);
+  color: white;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 10px;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(255, 77, 0, 0.4);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
 /* Orbit tab is now enabled */
 
 /* Orbit view scrollbar hiding */

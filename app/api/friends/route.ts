@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
-// GET - List all friends
+// GET - List all friends and pending requests
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions)
@@ -11,9 +11,51 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Get accepted friends (where current user is the requester)
     const friends = await prisma.friend.findMany({
       where: {
-        userId: session.user.id
+        userId: session.user.id,
+        status: 'accepted'
+      },
+      include: {
+        friend: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    })
+
+    // Get pending requests (where current user is the recipient)
+    const pendingRequests = await prisma.friend.findMany({
+      where: {
+        friendId: session.user.id,
+        status: 'pending'
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    })
+
+    // Get sent requests (where current user is the requester)
+    const sentRequests = await prisma.friend.findMany({
+      where: {
+        userId: session.user.id,
+        status: 'pending'
       },
       include: {
         friend: {
@@ -35,6 +77,22 @@ export async function GET(request: Request) {
         username: f.friend.username,
         email: f.friend.email,
         addedAt: f.createdAt,
+        status: f.status,
+      })),
+      pendingRequests: pendingRequests.map(r => ({
+        id: r.id,
+        userId: r.user.id,
+        username: r.user.username,
+        email: r.user.email,
+        requestedAt: r.createdAt,
+        status: r.status,
+      })),
+      sentRequests: sentRequests.map(r => ({
+        id: r.friend.id,
+        username: r.friend.username,
+        email: r.friend.email,
+        requestedAt: r.createdAt,
+        status: r.status,
       }))
     })
   } catch (error) {
@@ -56,9 +114,9 @@ export async function POST(request: Request) {
 
     const { friendId } = await request.json()
 
-    if (!friendId) {
+    if (!friendId || typeof friendId !== 'string') {
       return NextResponse.json(
-        { error: 'friendId is required' },
+        { error: 'friendId is required and must be a string' },
         { status: 400 }
       )
     }
@@ -70,7 +128,19 @@ export async function POST(request: Request) {
       )
     }
 
-    // Check if user exists
+    // Verify current user exists in database
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.user.id }
+    })
+
+    if (!currentUser) {
+      return NextResponse.json(
+        { error: 'Current user not found' },
+        { status: 404 }
+      )
+    }
+
+    // Check if friend user exists
     const friendUser = await prisma.user.findUnique({
       where: { id: friendId }
     })
@@ -82,7 +152,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // Check if already friends
+    // Check if already friends or request exists
     const existingFriend = await prisma.friend.findUnique({
       where: {
         userId_friendId: {
@@ -93,17 +163,87 @@ export async function POST(request: Request) {
     })
 
     if (existingFriend) {
-      return NextResponse.json(
-        { error: 'Already friends with this user' },
-        { status: 409 }
-      )
+      if (existingFriend.status === 'accepted') {
+        return NextResponse.json(
+          { error: 'Already friends with this user' },
+          { status: 409 }
+        )
+      } else if (existingFriend.status === 'pending') {
+        return NextResponse.json(
+          { error: 'Friend request already sent' },
+          { status: 409 }
+        )
+      }
     }
 
-    // Add friend
+    // Check if there's a pending request from the other user
+    const incomingRequest = await prisma.friend.findUnique({
+      where: {
+        userId_friendId: {
+          userId: friendId,
+          friendId: session.user.id
+        }
+      }
+    })
+
+    if (incomingRequest && incomingRequest.status === 'pending') {
+      // Auto-accept if there's a pending request from the other user
+      await prisma.friend.update({
+        where: {
+          userId_friendId: {
+            userId: friendId,
+            friendId: session.user.id
+          }
+        },
+        data: {
+          status: 'accepted'
+        }
+      })
+
+      // Create or update the reverse relationship
+      const friend = await prisma.friend.upsert({
+        where: {
+          userId_friendId: {
+            userId: session.user.id,
+            friendId: friendId
+          }
+        },
+        update: {
+          status: 'accepted'
+        },
+        create: {
+          userId: session.user.id,
+          friendId: friendId,
+          status: 'accepted',
+        },
+        include: {
+          friend: {
+            select: {
+              id: true,
+              username: true,
+              email: true,
+            }
+          }
+        }
+      })
+
+      return NextResponse.json({
+        friend: {
+          id: friend.friend.id,
+          username: friend.friend.username,
+          email: friend.friend.email,
+          addedAt: friend.createdAt,
+          status: friend.status,
+        }
+      }, { status: 201 })
+    }
+
+    // Create friend request
     const friend = await prisma.friend.create({
       data: {
         userId: session.user.id,
         friendId: friendId,
+        status: 'pending',
       },
       include: {
         friend: {
@@ -122,6 +262,7 @@ export async function POST(request: Request) {
         username: friend.friend.username,
         email: friend.friend.email,
         addedAt: friend.createdAt,
+        status: friend.status,
       }
     }, { status: 201 })
   } catch (error) {
@@ -151,10 +292,13 @@ export async function DELETE(request: Request) {
       )
     }
 
+    // Delete both directions of the friendship
     await prisma.friend.deleteMany({
       where: {
-        userId: session.user.id,
-        friendId: friendId
+        OR: [
+          { userId: session.user.id, friendId: friendId },
+          { userId: friendId, friendId: session.user.id }
+        ]
       }
     })
 

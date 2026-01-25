@@ -72,6 +72,15 @@ export async function POST(request: Request) {
           data: {
             userId: userId,
             friendId: friend.id,
+            status: 'accepted',
+          }
+        })
+        // Create reverse relationship
+        await prisma.friend.create({
+          data: {
+            userId: friend.id,
+            friendId: userId,
+            status: 'accepted',
           }
         })
       }

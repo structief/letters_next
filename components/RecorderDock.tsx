@@ -170,15 +170,46 @@ export default function RecorderDock({
 
       const { audioUrl } = await uploadResponse.json()
 
-      // Get audio duration (approximate)
-      const audio = new Audio(audioUrl)
+      // Get audio duration from the blob directly (more reliable than loading from URL)
       const duration = await new Promise<number>((resolve) => {
-        audio.addEventListener('loadedmetadata', () => {
-          resolve(Math.floor(audio.duration))
-        })
-        audio.addEventListener('error', () => {
-          resolve(10) // Default duration if can't load
-        })
+        const audio = new Audio()
+        const blobUrl = URL.createObjectURL(audioBlob)
+        audio.src = blobUrl
+        
+        const cleanup = () => {
+          URL.revokeObjectURL(blobUrl)
+          audio.removeEventListener('loadedmetadata', handleLoaded)
+          audio.removeEventListener('error', handleError)
+        }
+        
+        const handleLoaded = () => {
+          const durationValue = Math.floor(audio.duration)
+          cleanup()
+          resolve(durationValue > 0 ? durationValue : 1) // Minimum 1 second
+        }
+        
+        const handleError = () => {
+          cleanup()
+          // Fallback: estimate duration from blob size (rough approximation)
+          // WebM/Opus is roughly 1KB per second at 32kbps
+          const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 1000))
+          resolve(estimatedDuration)
+        }
+        
+        audio.addEventListener('loadedmetadata', handleLoaded)
+        audio.addEventListener('error', handleError)
+        
+        // Start loading
+        audio.load()
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          if (audio.readyState < 2) { // HAVE_CURRENT_DATA
+            cleanup()
+            const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 1000))
+            resolve(estimatedDuration)
+          }
+        }, 5000)
       })
 
       // Create message
