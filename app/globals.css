@@ -414,7 +414,6 @@ header {
 /* Active bars during playback - orange color moving from left to right */
 .wave-bar.active {
   background: var(--filament-accent);
-  opacity: 1 !important;
   animation: vibrate 0.5s infinite ease-in-out alternate;
 }
 

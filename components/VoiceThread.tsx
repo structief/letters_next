@@ -80,6 +80,7 @@ export default function VoiceThread({
   let [totalDuration, setTotalDuration] = useState(0)
   const [hasFinishedPlaying, setHasFinishedPlaying] = useState(false)
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   const hasStartedPlayingRef = useRef(false)
   const markedMessagesRef = useRef<Set<string>>(new Set())
   const [loadedMessages, setLoadedMessages] = useState<Set<string>>(new Set())
@@ -298,6 +299,10 @@ export default function VoiceThread({
         clearInterval(progressIntervalRef.current)
         progressIntervalRef.current = null
       }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
     }
   }, [pauseAudio])
 
@@ -312,6 +317,10 @@ export default function VoiceThread({
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
         progressIntervalRef.current = null
+      }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
       }
       setHasFinishedPlaying(false)
       return
@@ -525,7 +534,7 @@ export default function VoiceThread({
       }
     }
 
-    // Set up timer update interval
+    // Set up smooth progress updates using requestAnimationFrame
     const updateProgress = () => {
       if (audioRef.current && isPlaying) {
         if (allMessages.length <= 1) {
@@ -541,14 +550,26 @@ export default function VoiceThread({
           totalElapsed += current
           setCurrentTime(totalElapsed)
         }
+        // Continue animation frame loop
+        animationFrameRef.current = requestAnimationFrame(updateProgress)
       }
     }
 
-    progressIntervalRef.current = setInterval(updateProgress, 100)
+    // Start the animation frame loop
+    animationFrameRef.current = requestAnimationFrame(updateProgress)
 
     return () => {
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
+        progressIntervalRef.current = null
+      }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
       }
     }
   }, [isPlaying, pauseAudio, allMessages, currentMessageIndex, conversation.lastMessage, session?.user?.id, markAsRead, loadedMessages])
@@ -565,6 +586,10 @@ export default function VoiceThread({
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
         progressIntervalRef.current = null
+      }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
       }
       
       // Only mark as read if playback had actually started (not on initial mount)
@@ -645,6 +670,10 @@ export default function VoiceThread({
         clearInterval(progressIntervalRef.current)
         progressIntervalRef.current = null
       }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
       
       // Mark as read if needed
       if (conversation.lastMessage && !conversation.lastMessage.isRead && conversation.lastMessage.senderId !== session?.user?.id) {
@@ -666,6 +695,10 @@ export default function VoiceThread({
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
         progressIntervalRef.current = null
+      }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
       }
       
       // Don't call onStop() - keep the screen visible so users can reply immediately
@@ -693,6 +726,10 @@ export default function VoiceThread({
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
         progressIntervalRef.current = null
+      }
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
       }
       
       // Don't call onStop() - keep the screen visible so users can reply immediately
@@ -877,8 +914,9 @@ export default function VoiceThread({
                 const isBarLoaded = i < loadingBarIndex
                 const isLoading = loadingMessages.has(displayMessage?.id || '')
                 
-                // Determine if this bar should be orange during playback
+                // Determine if this bar should be orange during playback (with smooth transition)
                 let isBarActive = false
+                let barActiveOpacity = 1
                 if (isPlaying && !pauseAudio && !hasFinishedPlaying && displayMessage) {
                   const messageDuration = displayMessage.duration || totalDuration
                   if (messageDuration > 0) {
@@ -893,8 +931,20 @@ export default function VoiceThread({
                       currentMessageTime = currentTime - elapsedBeforeCurrent
                     }
                     const playbackProgress = Math.min(1, Math.max(0, currentMessageTime / messageDuration))
-                    const activeBarIndex = Math.floor(playbackProgress * totalBars)
-                    isBarActive = i <= activeBarIndex
+                    const exactBarPosition = playbackProgress * totalBars
+                    
+                    // Calculate how far through the waveform we are
+                    if (i < exactBarPosition) {
+                      // We've passed this bar - fully active
+                      isBarActive = true
+                      barActiveOpacity = 1
+                    } else if (i < exactBarPosition + 1) {
+                      // We're in this bar - calculate opacity based on progress
+                      isBarActive = true
+                      const progressInBar = exactBarPosition - i
+                      // Smooth opacity from 0.3 to 1.0 as we progress through the bar
+                      barActiveOpacity = 0.3 + (progressInBar * 0.7)
+                    }
                   }
                 }
                 
@@ -904,10 +954,11 @@ export default function VoiceThread({
                     className={`wave-bar ${isBarActive ? 'active' : ''} ${isLoading && !isBarLoaded ? 'loading' : ''}`}
                     style={{
                       height: isLoading && !isBarLoaded ? '5px' : `${height}px`,
+                      opacity: isBarActive ? barActiveOpacity : undefined,
                       transition: isLoading && !isBarLoaded 
                         ? `height 0.15s ease-out ${i * 0.02}s` 
                         : isBarActive 
-                        ? 'background 0.1s ease, opacity 0.1s ease' 
+                        ? 'background 0.03s linear, opacity 0.03s linear' 
                         : 'all 0.3s ease',
                     }}
                   />
