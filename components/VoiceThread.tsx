@@ -78,6 +78,7 @@ export default function VoiceThread({
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   let [totalDuration, setTotalDuration] = useState(0)
+  const [actualMessageDuration, setActualMessageDuration] = useState<number | null>(null) // Store actual audio duration
   const [hasFinishedPlaying, setHasFinishedPlaying] = useState(false)
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const animationFrameRef = useRef<number | null>(null)
@@ -323,6 +324,7 @@ export default function VoiceThread({
         animationFrameRef.current = null
       }
       setHasFinishedPlaying(false)
+      setActualMessageDuration(null) // Reset when stopping
       return
     }
 
@@ -491,6 +493,8 @@ export default function VoiceThread({
         audioRef.current.src = messageToPlay.audioUrl
         // Reset currentTime when changing src
         audioRef.current.currentTime = 0
+        // Reset actual duration when changing message
+        setActualMessageDuration(null)
       } else if (!wasPlaying && currentTimeBefore === 0) {
         // Only reset if audio wasn't playing and is at the start
         audioRef.current.currentTime = 0
@@ -814,6 +818,9 @@ export default function VoiceThread({
               const actualDuration = audioRef.current.duration
               // Use actual duration if available and valid
               if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
+                // Store the actual duration for the current message
+                setActualMessageDuration(actualDuration)
+                
                 if (allMessages.length <= 1) {
                   // Single message - update total duration
                   setTotalDuration(actualDuration)
@@ -861,9 +868,10 @@ export default function VoiceThread({
             // Ensure audio can actually play
             if (audioRef.current && isPlaying && !pauseAudio) {
               // Update duration from actual audio element if available
-              if (allMessages.length <= 1 && audioRef.current.duration) {
-                const actualDuration = audioRef.current.duration
-                if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
+              const actualDuration = audioRef.current.duration
+              if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
+                setActualMessageDuration(actualDuration)
+                if (allMessages.length <= 1) {
                   setTotalDuration(actualDuration)
                 }
               }
@@ -918,18 +926,33 @@ export default function VoiceThread({
                 let isBarActive = false
                 let barActiveOpacity = 1
                 if (isPlaying && !pauseAudio && !hasFinishedPlaying && displayMessage) {
-                  const messageDuration = displayMessage.duration || totalDuration
+                  // Use actual audio duration if available, otherwise fall back to stored duration
+                  // This ensures smooth animation even if stored duration is rounded
+                  const messageDuration = actualMessageDuration || displayMessage.duration || totalDuration
                   if (messageDuration > 0) {
                     // Calculate current playback position within the current message
-                    let currentMessageTime = currentTime
-                    if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
-                      // For multiple messages, calculate time within current message
-                      let elapsedBeforeCurrent = 0
-                      for (let j = 0; j < currentMessageIndex; j++) {
-                        elapsedBeforeCurrent += allMessages[j].duration
+                    // For single message or when we have the actual duration, use audioRef directly
+                    let currentMessageTime: number
+                    if (allMessages.length <= 1 || actualMessageDuration) {
+                      // Use audio element's currentTime directly for most accurate timing
+                      if (audioRef.current) {
+                        currentMessageTime = audioRef.current.currentTime || 0
+                      } else {
+                        currentMessageTime = currentTime
                       }
-                      currentMessageTime = currentTime - elapsedBeforeCurrent
+                    } else {
+                      // For multiple messages without actual duration, calculate from state
+                      currentMessageTime = currentTime
+                      if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+                        // For multiple messages, calculate time within current message
+                        let elapsedBeforeCurrent = 0
+                        for (let j = 0; j < currentMessageIndex; j++) {
+                          elapsedBeforeCurrent += allMessages[j].duration
+                        }
+                        currentMessageTime = currentTime - elapsedBeforeCurrent
+                      }
                     }
+                    
                     const playbackProgress = Math.min(1, Math.max(0, currentMessageTime / messageDuration))
                     const exactBarPosition = playbackProgress * totalBars
                     
