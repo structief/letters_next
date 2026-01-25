@@ -156,7 +156,7 @@ export default function VoiceFeed({ activeTab }: VoiceFeedProps) {
           </div>
         ) : conversations.length === 0 ? (
           <div style={{ textAlign: 'center', opacity: 0.4, padding: '48px' }}>
-            No conversations yet. Click &quot;New Chat&quot; to start a conversation.
+            No conversations yet. Add friends in &quot;Orbit&quot; to start a conversation.
           </div>
         ) : (
           conversations.map((conv, index) => (
