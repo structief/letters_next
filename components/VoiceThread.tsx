@@ -334,7 +334,12 @@ export default function VoiceThread({
           next.delete(messageToPlay.id)
           return next
         })
-        console.error(`Failed to load audio for message ${messageToPlay.id}`)
+        
+        // Don't log errors during preload - the audio might still load/play successfully
+        // when audioRef.current.src is set directly during playback.
+        // Preload failures are often transient and don't prevent actual playback.
+        // Only log if there's a persistent, real error that prevents playback.
+        // Since playback works, we'll skip logging preload errors to avoid false positives.
       }
       
       audio.addEventListener('canplaythrough', handleCanPlay)
