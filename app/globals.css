@@ -810,8 +810,9 @@ header {
 
 /* Auth pages styles */
 .auth-container {
+  min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
-  max-width: 400px;
   height: 844px;
   background: var(--alabaster-base);
   position: relative;
