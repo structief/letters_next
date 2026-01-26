@@ -54,9 +54,20 @@ export async function GET(request: Request) {
           notIn: [...friendIds, ...Array.from(pendingUserIds)] // Exclude users who are already friends or have pending requests
         },
         ...(search && {
-          username: {
-            contains: search
-          }
+          OR: [
+            {
+              username: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            },
+            {
+              email: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          ]
         })
       },
       select: {
