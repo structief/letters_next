@@ -24,7 +24,7 @@ export default function CookieBanner() {
     <div className="cookie-banner">
       <div className="cookie-banner-content">
         <p className="cookie-banner-text">
-          We use cookies to keep you signed in once you do. By continuing, you agree to our use of cookies. That's it. No tracking. No data collection.
+          We use cookies to keep you signed in once you do. By continuing, you agree to our use of cookies. That&apos;s it. No tracking. No data collection.
         </p>
         <button onClick={handleAccept} className="cookie-banner-button">
           Accept

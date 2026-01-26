@@ -11,7 +11,7 @@ export default function NotFound() {
       <AnnouncementBar />
       <div className="landing-content">
         <h1 className="landing-title">404</h1>
-        <p className="landing-subtitle">Page not found.<br/><br/>Let's get you back home.</p>
+        <p className="landing-subtitle">Page not found.<br/><br/>Let&apos;s get you back home.</p>
         <div className="landing-waveform-wrapper">
           <LandingWaveform />
         </div>
