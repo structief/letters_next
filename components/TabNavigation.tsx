@@ -70,6 +70,21 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
           pendingRequests: newPendingRequests,
           unreadMessages: newUnreadMessages,
         }
+
+        // Sync counts with service worker to prevent duplicate notifications
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then((registration) => {
+            if (registration.active) {
+              registration.active.postMessage({
+                type: 'UPDATE_COUNTS',
+                counts: {
+                  pendingRequests: newPendingRequests,
+                  unreadMessages: newUnreadMessages
+                }
+              })
+            }
+          })
+        }
       }
     } catch (error) {
       console.error('Error fetching notification counts:', error)

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { useNotification } from '@/contexts/NotificationContext'
 
 interface Conversation {
   id: string | null
@@ -15,6 +16,7 @@ interface Conversation {
     audioUrl: string
     duration: number
     waveform?: number[] | null
+    transcription?: string | null
     senderId: string
     isRead: boolean
     sender: {
@@ -33,6 +35,7 @@ interface Message {
   audioUrl: string
   duration: number
   waveform?: number[] | null
+  transcription?: string | null
   senderId: string
   receiverId?: string
   isRead: boolean
@@ -70,6 +73,7 @@ export default function VoiceThread({
 }: VoiceThreadProps) {
   const router = useRouter()
   const { data: session } = useSession()
+  const { showNotification } = useNotification()
   const [waveform, setWaveform] = useState<number[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isAudioPlaying, setIsAudioPlaying] = useState(false)
@@ -89,6 +93,9 @@ export default function VoiceThread({
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
   const [waveformLoadingProgress, setWaveformLoadingProgress] = useState<number>(0) // 0-1, tracks loading progress for waveform bars
   const loadingProgressIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const skippedMessagesRef = useRef<Set<string>>(new Set()) // Track messages we've skipped due to 404
+  const [messageTranscriptions, setMessageTranscriptions] = useState<Map<string, string | null>>(new Map()) // Track transcriptions for polling updates
+  const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map()) // Track polling intervals
 
   // Set waveform from stored data or generate fallback
   useEffect(() => {
@@ -110,6 +117,40 @@ export default function VoiceThread({
   useEffect(() => {
     setLocalIsRead(conversation.lastMessage?.isRead ?? false)
   }, [conversation.lastMessage?.isRead])
+
+  // Handle 404 errors: show notification and skip to next message
+  const handle404Error = useCallback(async (messageId: string) => {
+    // Show error notification
+    showNotification('Voice message not found on server', 'error')
+    
+    // If we're currently playing this message, skip to the next one
+    if (isPlaying && allMessages.length > 0) {
+      const currentIndex = allMessages.findIndex(msg => msg.id === messageId)
+      if (currentIndex >= 0 && currentIndex < allMessages.length) {
+        // Find the next available message (not skipped)
+        let nextIndex = currentIndex + 1
+        while (nextIndex < allMessages.length && skippedMessagesRef.current.has(allMessages[nextIndex].id)) {
+          nextIndex++
+        }
+        
+        if (nextIndex < allMessages.length) {
+          // Move to next message
+          setCurrentMessageIndex(nextIndex)
+          // Calculate elapsed time up to next message
+          let elapsedTime = 0
+          for (let i = 0; i < nextIndex; i++) {
+            elapsedTime += allMessages[i].duration
+          }
+          setCurrentTime(elapsedTime)
+        } else {
+          // No more messages available, stop playback
+          setIsAudioPlaying(false)
+          setHasFinishedPlaying(true)
+          onStop()
+        }
+      }
+    }
+  }, [isPlaying, allMessages, showNotification, onStop])
 
   const markAsRead = useCallback(async (messageId: string) => {
     // Don't mark as read if there's no conversation (friend without messages)
@@ -156,16 +197,23 @@ export default function VoiceThread({
             setAllMessages(messages)
             
             // Find first unread message index, or start at the beginning
+            // Skip messages that are already marked as skipped
+            const availableMessages = messages.filter((msg: Message) => !skippedMessagesRef.current.has(msg.id))
             const firstUnreadIndex = data.firstUnreadMessageId 
-              ? messages.findIndex((msg: Message) => msg.id === data.firstUnreadMessageId)
+              ? availableMessages.findIndex((msg: Message) => msg.id === data.firstUnreadMessageId)
               : -1
             
             // If all messages are read or there are no messages, start at the last one
             const startIndex = firstUnreadIndex >= 0 
               ? firstUnreadIndex 
+              : Math.max(0, availableMessages.length - 1)
+            
+            // Map back to original index in messages array
+            const originalStartIndex = startIndex >= 0 && startIndex < availableMessages.length
+              ? messages.findIndex((msg: Message) => msg.id === availableMessages[startIndex].id)
               : Math.max(0, messages.length - 1)
             
-            setCurrentMessageIndex(startIndex)
+            setCurrentMessageIndex(originalStartIndex)
             
             // Calculate elapsed time up to starting message
             let elapsedTime = 0
@@ -184,7 +232,9 @@ export default function VoiceThread({
             
             // Preload all audio files in parallel
             const messagesToPreload = messages.length > 0 ? messages : (conversation.lastMessage ? [conversation.lastMessage] : [])
-            setLoadingMessages(new Set(messagesToPreload.map((msg: Message) => msg.id)))
+            // Filter out already skipped messages
+            const messagesToLoad = messagesToPreload.filter((msg: Message) => !skippedMessagesRef.current.has(msg.id))
+            setLoadingMessages(new Set(messagesToLoad.map((msg: Message) => msg.id)))
             setLoadedMessages(new Set())
             setWaveformLoadingProgress(0) // Reset loading progress
             
@@ -196,7 +246,7 @@ export default function VoiceThread({
             audioElementsRef.current.clear()
             
             // Create and preload audio elements for all messages
-            const loadPromises = messagesToPreload.map((msg: Message) => {
+            const loadPromises = messagesToLoad.map((msg: Message) => {
               return new Promise<void>((resolve, reject) => {
                 const audio = new Audio()
                 audio.preload = 'auto'
@@ -220,7 +270,7 @@ export default function VoiceThread({
                   resolve()
                 }
                 
-                const handleError = () => {
+                const handleError = async () => {
                   audio.removeEventListener('canplaythrough', handleCanPlay)
                   audio.removeEventListener('error', handleError)
                   audio.removeEventListener('progress', handleProgress)
@@ -229,7 +279,22 @@ export default function VoiceThread({
                     next.delete(msg.id)
                     return next
                   })
-                  reject(new Error(`Failed to load audio for message ${msg.id}`))
+                  
+                  // Check if this is a 404 error
+                  try {
+                    const response = await fetch(msg.audioUrl, { method: 'HEAD' })
+                    if (response.status === 404) {
+                      // Mark this message as skipped
+                      skippedMessagesRef.current.add(msg.id)
+                      reject(new Error(`404: Message not found`))
+                    } else {
+                      reject(new Error(`Failed to load audio for message ${msg.id}`))
+                    }
+                  } catch (fetchError) {
+                    // If fetch fails, assume it might be a 404
+                    skippedMessagesRef.current.add(msg.id)
+                    reject(new Error(`Failed to load audio for message ${msg.id}`))
+                  }
                 }
                 
                 const handleProgress = () => {
@@ -277,6 +342,8 @@ export default function VoiceThread({
       setLoadedMessages(new Set())
       setLoadingMessages(new Set())
       setWaveformLoadingProgress(0)
+      // Reset skipped messages when stopping playback
+      skippedMessagesRef.current.clear()
       // Clean up audio elements
       audioElementsRef.current.forEach((audio) => {
         audio.pause()
@@ -351,6 +418,33 @@ export default function VoiceThread({
       setIsAudioPlaying(false)
       return
     }
+    
+    // Skip messages that are marked as skipped (404)
+    if (skippedMessagesRef.current.has(messageToPlay.id)) {
+      // Try to move to next message
+      if (allMessages.length > 1 && currentMessageIndex < allMessages.length - 1) {
+        // Find next available message
+        let nextIndex = currentMessageIndex + 1
+        while (nextIndex < allMessages.length && skippedMessagesRef.current.has(allMessages[nextIndex].id)) {
+          nextIndex++
+        }
+        if (nextIndex < allMessages.length) {
+          setCurrentMessageIndex(nextIndex)
+          // Calculate elapsed time up to next message
+          let elapsedTime = 0
+          for (let i = 0; i < nextIndex; i++) {
+            elapsedTime += allMessages[i].duration
+          }
+          setCurrentTime(elapsedTime)
+          return
+        }
+      }
+      // No more messages available, stop playback
+      setIsAudioPlaying(false)
+      setHasFinishedPlaying(true)
+      onStop()
+      return
+    }
 
     // If message is not loaded yet, try to load it now (for newly sent messages)
     if (!loadedMessages.has(messageToPlay.id) && !loadingMessages.has(messageToPlay.id)) {
@@ -375,7 +469,7 @@ export default function VoiceThread({
         setWaveformLoadingProgress(1) // Fully loaded
       }
       
-      const handleError = () => {
+      const handleError = async () => {
         audio.removeEventListener('canplaythrough', handleCanPlay)
         audio.removeEventListener('error', handleError)
         audio.removeEventListener('progress', handleProgress)
@@ -385,11 +479,20 @@ export default function VoiceThread({
           return next
         })
         
-        // Don't log errors during preload - the audio might still load/play successfully
-        // when audioRef.current.src is set directly during playback.
-        // Preload failures are often transient and don't prevent actual playback.
-        // Only log if there's a persistent, real error that prevents playback.
-        // Since playback works, we'll skip logging preload errors to avoid false positives.
+        // Check if this is a 404 error
+        try {
+          const response = await fetch(messageToPlay.audioUrl, { method: 'HEAD' })
+          if (response.status === 404) {
+            // Mark this message as skipped
+            skippedMessagesRef.current.add(messageToPlay.id)
+            // Handle 404: show notification and skip to next message
+            handle404Error(messageToPlay.id)
+          }
+        } catch (fetchError) {
+          // If fetch fails, assume it might be a 404
+          skippedMessagesRef.current.add(messageToPlay.id)
+          handle404Error(messageToPlay.id)
+        }
       }
       
       const handleProgress = () => {
@@ -576,7 +679,7 @@ export default function VoiceThread({
         animationFrameRef.current = null
       }
     }
-  }, [isPlaying, pauseAudio, allMessages, currentMessageIndex, conversation.lastMessage, session?.user?.id, markAsRead, loadedMessages])
+  }, [isPlaying, pauseAudio, allMessages, currentMessageIndex, conversation.lastMessage, session?.user?.id, markAsRead, loadedMessages, loadingMessages, handle404Error, onStop])
 
   // Handle stopping playback
   useEffect(() => {
@@ -614,6 +717,90 @@ export default function VoiceThread({
       setCurrentTime(0)
     }
   }, [isPlaying, allMessages, currentMessageIndex, conversation.lastMessage, localIsRead, session?.user?.id, markAsRead])
+
+  // Poll for transcriptions of recent messages without transcription
+  useEffect(() => {
+    const messagesToPoll: Array<{ id: string; createdAt: string }> = []
+    
+    // Add lastMessage if it needs polling
+    if (conversation.lastMessage) {
+      const lastMsg = conversation.lastMessage
+      const transcription = messageTranscriptions.get(lastMsg.id) ?? lastMsg.transcription ?? null
+      const messageAge = Date.now() - new Date(lastMsg.createdAt).getTime()
+      const isRecent = messageAge < 5 * 60 * 1000 // 5 minutes
+      
+      if (!transcription && isRecent) {
+        messagesToPoll.push({ id: lastMsg.id, createdAt: lastMsg.createdAt })
+      }
+    }
+    
+    // Add allMessages that need polling
+    allMessages.forEach(msg => {
+      const transcription = messageTranscriptions.get(msg.id) ?? msg.transcription ?? null
+      const messageAge = Date.now() - new Date(msg.createdAt).getTime()
+      const isRecent = messageAge < 5 * 60 * 1000 // 5 minutes
+      
+      if (!transcription && isRecent) {
+        messagesToPoll.push({ id: msg.id, createdAt: msg.createdAt })
+      }
+    })
+
+    // Start polling for each message
+    messagesToPoll.forEach(({ id, createdAt }) => {
+      // Skip if already polling
+      if (pollingIntervalsRef.current.has(id)) {
+        return
+      }
+
+      const pollMessage = async () => {
+        try {
+          const response = await fetch(`/api/messages/${id}`)
+          if (response.ok) {
+            const data = await response.json()
+            const transcription = data.message?.transcription ?? null
+            
+            if (transcription) {
+              // Update local state with transcription
+              setMessageTranscriptions(prev => {
+                const next = new Map(prev)
+                next.set(id, transcription)
+                return next
+              })
+              
+              // Stop polling for this message
+              const interval = pollingIntervalsRef.current.get(id)
+              if (interval) {
+                clearInterval(interval)
+                pollingIntervalsRef.current.delete(id)
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error polling transcription for message ${id}:`, error)
+        }
+      }
+
+      // Poll immediately, then every 2.5 seconds
+      pollMessage()
+      const interval = setInterval(pollMessage, 2500)
+      pollingIntervalsRef.current.set(id, interval)
+    })
+
+    // Cleanup: stop polling for messages that no longer need it
+    pollingIntervalsRef.current.forEach((interval, id) => {
+      const shouldPoll = messagesToPoll.some(msg => msg.id === id)
+      if (!shouldPoll) {
+        clearInterval(interval)
+        pollingIntervalsRef.current.delete(id)
+      }
+    })
+
+    // Cleanup function
+    return () => {
+      pollingIntervalsRef.current.forEach(interval => clearInterval(interval))
+      pollingIntervalsRef.current.clear()
+    }
+  }, [conversation.lastMessage, allMessages, messageTranscriptions])
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation() // Prevent triggering feed click handler
@@ -792,10 +979,29 @@ export default function VoiceThread({
        (!displayMessage.isRead && 'receiverId' in displayMessage && displayMessage.receiverId === session?.user?.id ? 'new' : 'listened'))
     : messageState
 
+  // Get transcription from local state (polling updates) or message
+  const getTranscription = (message: typeof displayMessage) => {
+    if (!message) return null
+    return messageTranscriptions.get(message.id) ?? message.transcription ?? null
+  }
+
+  const transcription = getTranscription(displayMessage)
+  
+  // Check if message is recent (less than 2 minutes old) and has no transcription
+  const isRecentMessage = displayMessage 
+    ? (Date.now() - new Date(displayMessage.createdAt).getTime()) < 2 * 60 * 1000
+    : false
+  
+  const isTranscribing = !transcription && isRecentMessage
+
   const previewText = displayMessage
-    ? isMine 
-      ? 'Voice message from you'
-      : `Voice message from ${displayMessage.sender.username}`
+    ? transcription
+      ? transcription
+      : isTranscribing
+      ? 'Transcribing...'
+      : isMine 
+        ? 'Voice message from you'
+        : `Voice message from ${displayMessage.sender.username}`
     : 'No messages yet'
 
   return (
@@ -859,10 +1065,31 @@ export default function VoiceThread({
               }
             }
           }}
-          onError={(e) => {
+          onError={async (e) => {
             console.error('Audio playback error:', e, audioRef.current?.src)
             // If audio fails to load, mark as not playing
             setIsAudioPlaying(false)
+            
+            // Check if this is a 404 error
+            const currentMessage = isPlaying && allMessages.length > 0 && currentMessageIndex < allMessages.length
+              ? allMessages[currentMessageIndex]
+              : conversation.lastMessage
+            
+            if (currentMessage) {
+              try {
+                const response = await fetch(currentMessage.audioUrl, { method: 'HEAD' })
+                if (response.status === 404) {
+                  // Mark this message as skipped
+                  skippedMessagesRef.current.add(currentMessage.id)
+                  // Handle 404: show notification and skip to next message
+                  await handle404Error(currentMessage.id)
+                }
+              } catch (fetchError) {
+                // If fetch fails, assume it might be a 404
+                skippedMessagesRef.current.add(currentMessage.id)
+                await handle404Error(currentMessage.id)
+              }
+            }
           }}
           onCanPlay={() => {
             // Ensure audio can actually play

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { transcribeAudio, summarizeText } from '@/lib/transcription'
 
 export async function GET(request: Request) {
   try {
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { audioUrl, duration, waveform, transcription, conversationId, receiverId } = await request.json()
+    const { audioUrl, duration, waveform, conversationId, receiverId } = await request.json()
 
     if (!audioUrl || duration == null || !receiverId) {
       return NextResponse.json(
@@ -125,7 +126,7 @@ export async function POST(request: Request) {
         audioUrl,
         duration,
         waveform: waveform ? waveform : null,
-        transcription: transcription ? transcription.trim() : null,
+        transcription: null, // Will be set asynchronously
         senderId: session.user.id,
         receiverId,
         conversationId: finalConversationId,
@@ -146,6 +147,13 @@ export async function POST(request: Request) {
       }
     })
 
+    // Trigger async transcription and summarization (fire-and-forget)
+    // Don't await - let it process in the background
+    processTranscriptionAsync(message.id, audioUrl).catch((error) => {
+      // Log errors but don't fail the request
+      console.error('Error processing transcription asynchronously:', error)
+    })
+
     return NextResponse.json({ message }, { status: 201 })
   } catch (error) {
     console.error('Error creating message:', error)
@@ -153,5 +161,38 @@ export async function POST(request: Request) {
       { error: 'Internal server error' },
       { status: 500 }
     )
+  }
+}
+
+/**
+ * Process transcription and summarization asynchronously
+ * This function runs in the background and updates the message when complete
+ */
+async function processTranscriptionAsync(messageId: string, audioUrl: string): Promise<void> {
+  try {
+    // Step 1: Transcribe audio
+    const fullTranscription = await transcribeAudio(audioUrl)
+    
+    if (!fullTranscription || fullTranscription.trim().length === 0) {
+      console.warn(`No transcription generated for message ${messageId}`)
+      return
+    }
+
+    // Step 2: Summarize transcription
+    const summary = await summarizeText(fullTranscription)
+
+    // Step 3: Update message with summary
+    // Directly update the database (more efficient than HTTP request)
+    await prisma.message.update({
+      where: { id: messageId },
+      data: {
+        transcription: summary || fullTranscription,
+      }
+    })
+
+    console.log(`Successfully processed transcription for message ${messageId}`)
+  } catch (error) {
+    console.error(`Error processing transcription for message ${messageId}:`, error)
+    // Don't throw - this is background processing
   }
 }

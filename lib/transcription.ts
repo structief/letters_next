@@ -1,75 +1,75 @@
-import { CreateMLCEngine, MLCEngine } from '@mlc-ai/web-llm'
-// @ts-ignore - @xenova/transformers may not have full TypeScript support
-import { pipeline, env } from '@xenova/transformers'
+import OpenAI from 'openai'
+import { readFile } from 'fs/promises'
+import { join } from 'path'
+import { existsSync } from 'fs'
 
-// Disable local model files for browser use
-env.allowLocalModels = false
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
 
-// Initialize transcriber (lazy load)
-let transcriberPipeline: any = null
-let llmEngine: MLCEngine | null = null
-
-export async function initializeTranscriber() {
-  if (transcriberPipeline) {
-    return transcriberPipeline
+/**
+ * Transcribe audio file using OpenAI Whisper API
+ * @param audioUrl - URL path to audio file (e.g., "/voice-messages/filename.webm")
+ * @returns Transcribed text or empty string on error
+ */
+export async function transcribeAudio(audioUrl: string): Promise<string> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('OPENAI_API_KEY not configured')
+    return ''
   }
 
   try {
-    // Use tiny English model for faster transcription
-    transcriberPipeline = await pipeline(
-      'automatic-speech-recognition',
-      'Xenova/whisper-tiny.en',
-      {
-        quantized: true,
-      }
-    )
+    // Extract filename from URL path
+    const filename = audioUrl.replace(/^\/voice-messages\//, '')
     
-    return transcriberPipeline
-  } catch (error) {
-    console.error('Failed to initialize Whisper transcriber:', error)
-    throw error
-  }
-}
+    // Security: prevent path traversal
+    if (filename.includes('..') || filename.includes('/')) {
+      console.error('Invalid audio path:', audioUrl)
+      return ''
+    }
 
-export async function initializeLLM(): Promise<MLCEngine> {
-  if (llmEngine) {
-    return llmEngine
-  }
+    // Construct file path
+    const filepath = join(process.cwd(), 'public', 'voice-messages', filename)
 
-  try {
-    // Use TinyLlama for summarization (small and fast)
-    llmEngine = await CreateMLCEngine('TinyLlama-1.1B-Chat-v0.4-q4f16_1', {
-      initProgressCallback: (progress) => {
-        console.log('LLM loading progress:', progress)
-      },
+    // Check if file exists
+    if (!existsSync(filepath)) {
+      console.error('Audio file not found:', filepath)
+      return ''
+    }
+
+    // Read file as buffer
+    const fileBuffer = await readFile(filepath)
+    
+    // Determine MIME type
+    const mimeType = filename.endsWith('.webm') ? 'audio/webm' : 
+                     filename.endsWith('.m4a') || filename.endsWith('.mp4') ? 'audio/mp4' :
+                     'audio/webm'
+    
+    // Create a File object for OpenAI API
+    // OpenAI SDK v4+ supports File objects in Node.js 18+
+    // File is available globally in Node.js 18+
+    const file = new File([fileBuffer], filename, { type: mimeType })
+
+    // Transcribe using Whisper API
+    const transcription = await openai.audio.transcriptions.create({
+      file: file,
+      model: 'whisper-1',
+      language: undefined, // Auto-detect language
     })
 
-    return llmEngine
-  } catch (error) {
-    console.error('Failed to initialize LLM:', error)
-    throw error
-  }
-}
-
-export async function transcribeAudio(audioBlob: Blob): Promise<string> {
-  try {
-    const transcriber = await initializeTranscriber()
-    
-    // Transcribe the audio blob
-    const result = await transcriber(audioBlob, {
-      chunk_length_s: 30,
-      stride_length_s: 5,
-    })
-    
-    // Extract text from result
-    const text = result?.text || ''
-    return text.trim()
+    return transcription.text.trim()
   } catch (error) {
     console.error('Transcription error:', error)
     return ''
   }
 }
 
+/**
+ * Summarize text using OpenAI Chat API
+ * @param text - Text to summarize
+ * @returns Summarized text or original text on error
+ */
 export async function summarizeText(text: string): Promise<string> {
   if (!text || text.trim().length === 0) {
     return ''
@@ -80,27 +80,29 @@ export async function summarizeText(text: string): Promise<string> {
     return text.trim()
   }
 
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('OPENAI_API_KEY not configured')
+    return text.trim()
+  }
+
   try {
-    const engine = await initializeLLM()
-    
-    const messages: Array<{ role: 'system' | 'user'; content: string }> = [
-      {
-        role: 'system',
-        content: 'You are a helpful assistant that summarizes voice messages concisely in one short sentence.'
-      },
-      {
-        role: 'user',
-        content: `Summarize this voice message in one or two short sentences (maximum 15 words in total). Leave out any non-essential details. Use short sentences and leave out any words that are not essential to the summary. Use the original language of the transcription. Keep it concise and capture the main point:\n\n${text}`
-      }
-    ]
-    
-    const reply = await engine.chat.completions.create({
-      messages: messages as any, // Type assertion needed for WebLLM API compatibility
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini', // Cost-effective model
+      messages: [
+        {
+          role: 'system',
+          content: 'Summarize this voice message in one or two short sentences (maximum 15 words in total). Use short sentences and leave out any words that are not essential to the summary. Use the original language of the transcription. Keep it concise and capture the main point.'
+        },
+        {
+          role: 'user',
+          content: `Transcription:\n\n${text}`
+        }
+      ],
       temperature: 0.7,
-      max_tokens: 50,
+      max_tokens: 500,
     })
 
-    const summary = reply.choices[0]?.message?.content?.trim() || ''
+    const summary = response.choices[0]?.message?.content?.trim() || ''
     
     // Fallback to original if summary is too long or empty
     if (summary.length > 150 || summary.length === 0) {
@@ -112,24 +114,5 @@ export async function summarizeText(text: string): Promise<string> {
     console.error('Summarization error:', error)
     // Fallback to original text if summarization fails
     return text.trim()
-  }
-}
-
-export async function transcribeAndSummarize(audioBlob: Blob): Promise<string> {
-  try {
-    // First transcribe
-    const fullTranscription = await transcribeAudio(audioBlob)
-    
-    if (!fullTranscription || fullTranscription.trim().length === 0) {
-      return ''
-    }
-
-    // Then summarize
-    const summary = await summarizeText(fullTranscription)
-    
-    return summary
-  } catch (error) {
-    console.error('Transcribe and summarize error:', error)
-    return ''
   }
 }
