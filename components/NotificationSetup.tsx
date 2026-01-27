@@ -20,7 +20,7 @@ async function subscribeToPushNotifications(registration: ServiceWorkerRegistrat
     }
 
     // Convert VAPID key to Uint8Array
-    const applicationServerKey = urlBase64ToUint8Array(publicKey)
+    const applicationServerKey = urlBase64ToUint8Array(publicKey) as BufferSource
 
     // Subscribe to push notifications
     const subscription = await registration.pushManager.subscribe({
