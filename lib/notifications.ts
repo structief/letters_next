@@ -78,14 +78,26 @@ export function registerServiceWorker(): Promise<ServiceWorkerRegistration | nul
     .then((registration) => {
       console.log('Service Worker registered:', registration)
       
+      // Force update check on every load to ensure we get the latest service worker
+      registration.update().catch((error) => {
+        console.error('Service Worker update check failed:', error)
+      })
+
+      // If there's a waiting service worker, activate it immediately
+      if (registration.waiting) {
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' })
+        console.log('Activating waiting service worker')
+      }
+      
       // Handle updates
       registration.addEventListener('updatefound', () => {
         const newWorker = registration.installing
         if (newWorker) {
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // New service worker available
-              console.log('New service worker available')
+              // New service worker installed - reload to activate
+              console.log('New service worker installed - reloading page')
+              window.location.reload()
             }
           })
         }

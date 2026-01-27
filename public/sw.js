@@ -1,5 +1,6 @@
 // Service Worker for PWA notifications
-const CACHE_NAME = 'lttrs-v1'
+// Update this version number when deploying to force cache invalidation
+const CACHE_NAME = 'lttrs-v2'
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {
@@ -18,6 +19,37 @@ self.addEventListener('activate', (event) => {
     })
   )
   return self.clients.claim()
+})
+
+// Fetch event - handle network requests
+// IMPORTANT: Do not cache Next.js build files or API routes
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url)
+  
+  // Never cache or interfere with:
+  // - Next.js build files (/_next/*)
+  // - API routes (/api/*)
+  // - Server actions (contain 'Next-Action' header)
+  // - Dynamic routes
+  if (
+    url.pathname.startsWith('/_next/') ||
+    url.pathname.startsWith('/api/') ||
+    event.request.headers.has('Next-Action') ||
+    event.request.method !== 'GET'
+  ) {
+    // Network only - do not cache
+    return event.respondWith(fetch(event.request))
+  }
+  
+  // For all other requests, use network-first strategy
+  event.respondWith(
+    fetch(event.request)
+      .catch(() => {
+        // If network fails, don't return anything from cache
+        // This ensures fresh data on new installs
+        return new Response('Network error', { status: 408 })
+      })
+  )
 })
 
 // Handle notification clicks
@@ -181,7 +213,10 @@ function stopPolling() {
 
 // Message handler for showing notifications from the app and controlling polling
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    // Skip waiting and activate immediately
+    self.skipWaiting()
+  } else if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
     const { title, options } = event.data
     
     event.waitUntil(

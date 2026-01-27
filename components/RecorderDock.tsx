@@ -240,6 +240,8 @@ export default function RecorderDock({
       })
 
       if (!messageResponse.ok) {
+        const errorText = await messageResponse.text()
+        console.error('Message send failed:', errorText)
         throw new Error('Failed to send message')
       }
 
@@ -250,7 +252,16 @@ export default function RecorderDock({
       }, 2000)
     } catch (error) {
       console.error('Error sending message:', error)
-      alert('Failed to send message. Please try again.')
+      
+      // Check if this is a Server Action cache error
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      if (errorMessage.includes('Server Action') || errorMessage.includes('Failed to find')) {
+        alert('App needs to reload. Please refresh the page and try again.')
+        // Force reload to clear any stale cache
+        window.location.reload()
+      } else {
+        alert('Failed to send message. Please try again.')
+      }
     }
   }
 
