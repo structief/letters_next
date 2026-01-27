@@ -288,6 +288,13 @@ header {
   gap: 3px;
   flex-shrink: 0;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.waveform-container.dragging {
+  cursor: grabbing;
 }
 
 .message-preview {
@@ -350,8 +357,15 @@ header {
   padding-left: 20px;
   opacity: 0.4;
   display: flex;
-  gap: 16px;
+  gap: 12px;
   text-transform: uppercase;
+}
+
+
+.meta-data .dragging-time {
+  opacity: 1;
+  color: var(--filament-accent);
+  font-weight: 500;
 }
 
 /* Progress Bar Container (Instagram Reels style) */
@@ -422,6 +436,13 @@ header {
 .wave-bar.active {
   background: var(--filament-accent);
   animation: vibrate 0.5s infinite ease-in-out alternate;
+}
+
+/* Drag position indicator - brighter highlight */
+.wave-bar.drag-position {
+  background: var(--filament-accent);
+  opacity: 1 !important;
+  box-shadow: 0 0 4px var(--filament-accent);
 }
 
 /* Loading bars - start at minimum height, animate to full height */

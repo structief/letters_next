@@ -97,6 +97,11 @@ export default function VoiceThread({
   const [messageTranscriptions, setMessageTranscriptions] = useState<Map<string, string | null>>(new Map()) // Track transcriptions for polling updates
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map()) // Track polling intervals
   const wakeLockRef = useRef<WakeLockSentinel | null>(null) // Screen wake lock to prevent screen from turning off
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragTime, setDragTime] = useState<number | null>(null) // Total time position during drag
+  const [dragMessageIndex, setDragMessageIndex] = useState<number | null>(null) // Message index during drag
+  const [dragMessageTime, setDragMessageTime] = useState<number | null>(null) // Time within message during drag
+  const waveformContainerRef = useRef<HTMLDivElement | null>(null)
 
   // Request screen wake lock to prevent screen from turning off during playback
   const requestWakeLock = useCallback(async () => {
@@ -864,6 +869,10 @@ export default function VoiceThread({
   }, [conversation.lastMessage, allMessages, messageTranscriptions])
 
   const handleClick = (e: React.MouseEvent) => {
+    // Don't handle click if we just finished dragging
+    if (isDragging) {
+      return
+    }
     e.stopPropagation() // Prevent triggering feed click handler
     // For friends without messages, clicking should just show the recorder (handled by parent)
     // Don't try to play audio if there's no lastMessage
@@ -1009,6 +1018,185 @@ export default function VoiceThread({
     if (diffDays < 7) return `${diffDays}D AGO`
     return `${Math.floor(diffDays / 7)}W AGO`
   }
+
+  // Calculate time position from X coordinate in waveform
+  // This only scrubs within the current message; cross-message jumps use the progress bar
+  const getTimeFromX = useCallback(
+    (clientX: number): { timeInMessage: number; totalTime: number } => {
+      if (!waveformContainerRef.current) {
+        return { timeInMessage: 0, totalTime: 0 }
+      }
+
+      const rect = waveformContainerRef.current.getBoundingClientRect()
+      const x = clientX - rect.left
+      const width = rect.width || 1
+      const progress = Math.max(0, Math.min(1, x / width))
+
+      // Determine duration of the *current* message only
+      let messageDuration = 0
+      if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+        messageDuration = allMessages[currentMessageIndex].duration
+      } else if (conversation.lastMessage) {
+        const base = allMessages.length > 0 ? allMessages[0] : conversation.lastMessage
+        messageDuration = actualMessageDuration || base.duration || totalDuration
+      } else {
+        messageDuration = totalDuration
+      }
+
+      if (messageDuration <= 0) {
+        return { timeInMessage: 0, totalTime: 0 }
+      }
+
+      const timeInMessage = progress * messageDuration
+
+      // Convert to total thread time by adding all previous message durations
+      let totalTime = timeInMessage
+      if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+        let elapsedBeforeCurrent = 0
+        for (let i = 0; i < currentMessageIndex; i++) {
+          elapsedBeforeCurrent += allMessages[i].duration
+        }
+        totalTime = elapsedBeforeCurrent + timeInMessage
+      }
+
+      return { timeInMessage, totalTime }
+    },
+    [allMessages, currentMessageIndex, conversation.lastMessage, actualMessageDuration, totalDuration]
+  )
+
+  // Handle waveform drag start
+  const handleWaveformDragStart = useCallback((clientX: number) => {
+    if (!conversation.lastMessage || !isPlaying) return
+    
+    // Pause audio during drag for smoother scrubbing
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause()
+    }
+    
+    setIsDragging(true)
+    const { timeInMessage, totalTime } = getTimeFromX(clientX)
+    
+    setDragTime(totalTime)
+    setDragMessageIndex(currentMessageIndex)
+    setDragMessageTime(timeInMessage)
+    setCurrentTime(totalTime)
+    
+    // Update audio element
+    if (audioRef.current) {
+      audioRef.current.currentTime = timeInMessage
+    }
+  }, [conversation.lastMessage, isPlaying, getTimeFromX, currentMessageIndex])
+
+  // Handle waveform drag move
+  const handleWaveformDragMove = useCallback((clientX: number) => {
+    if (!isDragging || !conversation.lastMessage) return
+    
+    const { timeInMessage, totalTime } = getTimeFromX(clientX)
+    
+    setDragTime(totalTime)
+    setDragMessageIndex(currentMessageIndex)
+    setDragMessageTime(timeInMessage)
+    setCurrentTime(totalTime)
+    
+    // Update audio element
+    if (audioRef.current) {
+      audioRef.current.currentTime = timeInMessage
+    }
+  }, [isDragging, conversation.lastMessage, getTimeFromX, currentMessageIndex])
+
+  // Handle waveform drag end
+  const handleWaveformDragEnd = useCallback(() => {
+    setIsDragging(false)
+    setDragTime(null)
+    setDragMessageIndex(null)
+    setDragMessageTime(null)
+    
+    // Resume audio playback if it was playing
+    if (audioRef.current && isPlaying && !pauseAudio) {
+      audioRef.current.play().catch(() => {
+        // Ignore play errors (e.g., user interaction required)
+      })
+    }
+  }, [isPlaying, pauseAudio])
+
+  // Mouse event handlers
+  const handleWaveformMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+    handleWaveformDragStart(e.clientX)
+  }, [handleWaveformDragStart])
+
+  const handleWaveformMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (isDragging) {
+      e.stopPropagation()
+      handleWaveformDragMove(e.clientX)
+    }
+  }, [isDragging, handleWaveformDragMove])
+
+  const handleWaveformMouseUp = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (isDragging) {
+      e.stopPropagation()
+      handleWaveformDragEnd()
+    }
+  }, [isDragging, handleWaveformDragEnd])
+
+  // Touch event handlers
+  const handleWaveformTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+    if (e.touches.length > 0) {
+      handleWaveformDragStart(e.touches[0].clientX)
+    }
+  }, [handleWaveformDragStart])
+
+  const handleWaveformTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (isDragging && e.touches.length > 0) {
+      e.stopPropagation()
+      e.preventDefault() // Prevent scrolling
+      handleWaveformDragMove(e.touches[0].clientX)
+    }
+  }, [isDragging, handleWaveformDragMove])
+
+  const handleWaveformTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (isDragging) {
+      e.stopPropagation()
+      handleWaveformDragEnd()
+    }
+  }, [isDragging, handleWaveformDragEnd])
+
+  // Global mouse/touch handlers for drag continuation outside waveform
+  useEffect(() => {
+    if (!isDragging) return
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      handleWaveformDragMove(e.clientX)
+    }
+
+    const handleGlobalMouseUp = () => {
+      handleWaveformDragEnd()
+    }
+
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        e.preventDefault()
+        handleWaveformDragMove(e.touches[0].clientX)
+      }
+    }
+
+    const handleGlobalTouchEnd = () => {
+      handleWaveformDragEnd()
+    }
+
+    window.addEventListener('mousemove', handleGlobalMouseMove)
+    window.addEventListener('mouseup', handleGlobalMouseUp)
+    window.addEventListener('touchmove', handleGlobalTouchMove, { passive: false })
+    window.addEventListener('touchend', handleGlobalTouchEnd)
+
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove)
+      window.removeEventListener('mouseup', handleGlobalMouseUp)
+      window.removeEventListener('touchmove', handleGlobalTouchMove)
+      window.removeEventListener('touchend', handleGlobalTouchEnd)
+    }
+  }, [isDragging, handleWaveformDragMove, handleWaveformDragEnd])
 
   // Determine message state using local read state
   const getMessageState = () => {
@@ -1202,7 +1390,17 @@ export default function VoiceThread({
       {conversation.lastMessage && (
         <>
           <div className="waveform-wrapper">
-            <div className={`waveform-container ${isPlaying && !pauseAudio && !hasFinishedPlaying ? 'playing' : ''}`}>
+            <div 
+              ref={waveformContainerRef}
+              className={`waveform-container ${isPlaying && !pauseAudio && !hasFinishedPlaying ? 'playing' : ''} ${isDragging ? 'dragging' : ''}`}
+              onMouseDown={handleWaveformMouseDown}
+              onMouseMove={handleWaveformMouseMove}
+              onMouseUp={handleWaveformMouseUp}
+              onMouseLeave={handleWaveformMouseUp}
+              onTouchStart={handleWaveformTouchStart}
+              onTouchMove={handleWaveformTouchMove}
+              onTouchEnd={handleWaveformTouchEnd}
+            >
               {waveform.map((height, i) => {
                 // Determine if this bar should be visible during loading
                 const totalBars = waveform.length
@@ -1210,35 +1408,47 @@ export default function VoiceThread({
                 const isBarLoaded = i < loadingBarIndex
                 const isLoading = loadingMessages.has(displayMessage?.id || '')
                 
-                // Determine if this bar should be orange during playback (with smooth transition)
+                // Determine if this bar should be orange during playback or drag (with smooth transition)
                 let isBarActive = false
                 let barActiveOpacity = 1
-                if (isPlaying && !pauseAudio && !hasFinishedPlaying && displayMessage) {
+                let isDragPosition = false
+                
+                // Use drag time if dragging, otherwise use playback time
+                const timeToUse = isDragging && dragTime !== null ? dragTime : 
+                  (isPlaying && !pauseAudio && !hasFinishedPlaying ? currentTime : null)
+                
+                if (timeToUse !== null && displayMessage) {
                   // Use actual audio duration if available, otherwise fall back to stored duration
-                  // This ensures smooth animation even if stored duration is rounded
                   const messageDuration = actualMessageDuration || displayMessage.duration || totalDuration
                   if (messageDuration > 0) {
-                    // Calculate current playback position within the current message
-                    // For single message or when we have the actual duration, use audioRef directly
                     let currentMessageTime: number
-                    if (allMessages.length <= 1 || actualMessageDuration) {
-                      // Use audio element's currentTime directly for most accurate timing
-                      if (audioRef.current) {
-                        currentMessageTime = audioRef.current.currentTime || 0
+                    
+                    if (isDragging && dragMessageTime !== null && dragMessageIndex !== null) {
+                      // During drag, use the stored message time
+                      currentMessageTime = dragMessageTime
+                    } else if (isPlaying && !pauseAudio && !hasFinishedPlaying) {
+                      // During playback
+                      if (allMessages.length <= 1 || actualMessageDuration) {
+                        // Use audio element's currentTime directly for most accurate timing
+                        if (audioRef.current) {
+                          currentMessageTime = audioRef.current.currentTime || 0
+                        } else {
+                          currentMessageTime = currentTime
+                        }
                       } else {
+                        // For multiple messages without actual duration, calculate from state
                         currentMessageTime = currentTime
+                        if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+                          // For multiple messages, calculate time within current message
+                          let elapsedBeforeCurrent = 0
+                          for (let j = 0; j < currentMessageIndex; j++) {
+                            elapsedBeforeCurrent += allMessages[j].duration
+                          }
+                          currentMessageTime = currentTime - elapsedBeforeCurrent
+                        }
                       }
                     } else {
-                      // For multiple messages without actual duration, calculate from state
-                      currentMessageTime = currentTime
-                      if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
-                        // For multiple messages, calculate time within current message
-                        let elapsedBeforeCurrent = 0
-                        for (let j = 0; j < currentMessageIndex; j++) {
-                          elapsedBeforeCurrent += allMessages[j].duration
-                        }
-                        currentMessageTime = currentTime - elapsedBeforeCurrent
-                      }
+                      currentMessageTime = 0
                     }
                     
                     const playbackProgress = Math.min(1, Math.max(0, currentMessageTime / messageDuration))
@@ -1255,6 +1465,10 @@ export default function VoiceThread({
                       const progressInBar = exactBarPosition - i
                       // Smooth opacity from 0.3 to 1.0 as we progress through the bar
                       barActiveOpacity = 0.3 + (progressInBar * 0.7)
+                      // Mark as drag position if dragging
+                      if (isDragging && Math.abs(i - exactBarPosition) < 0.5) {
+                        isDragPosition = true
+                      }
                     }
                   }
                 }
@@ -1262,7 +1476,7 @@ export default function VoiceThread({
                 return (
                   <div
                     key={i}
-                    className={`wave-bar ${isBarActive ? 'active' : ''} ${isLoading && !isBarLoaded ? 'loading' : ''}`}
+                    className={`wave-bar ${isBarActive ? 'active' : ''} ${isLoading && !isBarLoaded ? 'loading' : ''} ${isDragPosition ? 'drag-position' : ''}`}
                     style={{
                       height: isLoading && !isBarLoaded ? '5px' : `${height}px`,
                       opacity: isBarActive ? barActiveOpacity : undefined,
@@ -1336,7 +1550,9 @@ export default function VoiceThread({
           )}
           <div className="meta-data">
             {isPlaying && totalDuration > 0 ? (
-              <span>{formatDuration(Math.floor(currentTime))} / {formatDuration(totalDuration)}</span>
+              <span className={isDragging ? 'dragging-time' : ''}>
+                {formatDuration(Math.floor(isDragging && dragTime !== null ? dragTime : currentTime))} / {formatDuration(totalDuration)}
+              </span>
             ) : conversation.lastMessage ? (
               <span>
                 {formatDuration(conversation.lastMessage.duration)}
@@ -1346,8 +1562,11 @@ export default function VoiceThread({
               </span>
             ) : null}
             {conversation.lastMessage && (
+              <>
               <span>
                 {formatTimeAgo(conversation.lastMessage.createdAt)}
+              </span>
+              <span>
                 {' '}
                 {conversation.lastMessage.senderId === session?.user?.id ? (
                   // Message sent by me - show if receiver has listened
@@ -1356,6 +1575,7 @@ export default function VoiceThread({
                   </span>
                 ) : (<></>)}
               </span>
+              </>
             )}
           </div>
         </>
