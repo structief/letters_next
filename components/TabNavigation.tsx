@@ -16,8 +16,14 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
   const previousCountsRef = useRef({ pendingRequests: 0, unreadMessages: 0 })
   const isInitialLoadRef = useRef(true)
 
+  const isFetchingRef = useRef(false)
+  const lastUserIdRef = useRef<string | null>(null)
+
   const fetchCounts = useCallback(async () => {
     if (!session?.user?.id) return
+    if (isFetchingRef.current) return // Prevent concurrent fetches
+    
+    isFetchingRef.current = true
     try {
       const response = await fetch('/api/notifications/counts')
       if (response.ok) {
@@ -70,48 +76,46 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
           pendingRequests: newPendingRequests,
           unreadMessages: newUnreadMessages,
         }
-
-        // Sync counts with service worker to prevent duplicate notifications
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready.then((registration) => {
-            if (registration.active) {
-              registration.active.postMessage({
-                type: 'UPDATE_COUNTS',
-                counts: {
-                  pendingRequests: newPendingRequests,
-                  unreadMessages: newUnreadMessages
-                }
-              })
-            }
-          })
-        }
       }
     } catch (error) {
       console.error('Error fetching notification counts:', error)
+    } finally {
+      isFetchingRef.current = false
     }
   }, [session?.user?.id])
 
+  // Single effect to handle all fetching logic
   useEffect(() => {
-    if (!session?.user?.id) return
-
+    const currentUserId = session?.user?.id
+    if (!currentUserId) return
+    
+    // Only fetch if user ID changed (prevents duplicate fetches on re-renders)
+    if (lastUserIdRef.current === currentUserId) return
+    
+    lastUserIdRef.current = currentUserId
+    
+    // Reset initial load flag for new user
+    isInitialLoadRef.current = true
+    
+    // Initial fetch
     fetchCounts()
-    // Refresh counts every 30 seconds
-    const interval = setInterval(fetchCounts, 30000)
-    return () => clearInterval(interval)
-  }, [session?.user?.id, fetchCounts])
-
-  // Refresh counts when tab changes
-  useEffect(() => {
-    fetchCounts()
-  }, [activeTab, fetchCounts])
-
-  // Listen for custom events to refresh counts immediately
-  useEffect(() => {
-    window.addEventListener('refreshNotificationCounts', fetchCounts)
-    return () => {
-      window.removeEventListener('refreshNotificationCounts', fetchCounts)
+    
+    // Set up polling interval (30 seconds)
+    const interval = setInterval(() => {
+      fetchCounts()
+    }, 30000)
+    
+    // Listen for custom events to refresh counts immediately
+    const handleRefresh = () => {
+      fetchCounts()
     }
-  }, [fetchCounts])
+    window.addEventListener('refreshNotificationCounts', handleRefresh)
+    
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('refreshNotificationCounts', handleRefresh)
+    }
+  }, [session?.user?.id, fetchCounts])
 
   return (
     <nav className="tab-navigation">

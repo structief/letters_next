@@ -169,57 +169,55 @@ export default function VoiceFeed({ activeTab }: VoiceFeedProps) {
     showNotification('Conversations refreshed', 'info')
   }, [fetchConversations, showNotification])
 
+  // Single effect to handle initial fetch and polling
   useEffect(() => {
     // Only fetch when:
     // 1. Tab is 'friends'
     // 2. Session is authenticated
     // 3. We have a user ID
-    // 4. We haven't fetched for this user yet (or user changed)
     const currentUserId = session?.user?.id
     const shouldFetch = 
       activeTab === 'friends' && 
       status === 'authenticated' && 
-      currentUserId && 
-      lastFetchedUserIdRef.current !== currentUserId
+      currentUserId
 
-    if (shouldFetch) {
+    if (!shouldFetch) {
+      // Clear polling if we shouldn't fetch
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+      return
+    }
+
+    // Check if we need to fetch (new user or first time)
+    const needsInitialFetch = lastFetchedUserIdRef.current !== currentUserId
+
+    if (needsInitialFetch) {
       lastFetchedUserIdRef.current = currentUserId
       fetchConversations()
     }
-  }, [activeTab, status, session?.user?.id, fetchConversations])
 
-  // Poll for conversation changes every 30 seconds
-  useEffect(() => {
-    // Only poll when:
-    // 1. Tab is 'friends'
-    // 2. Session is authenticated
-    // 3. We have conversations loaded (or at least tried to load)
-    const shouldPoll = activeTab === 'friends' && status === 'authenticated' && !loading
+    // Set up polling interval (only after initial load completes)
+    // Clear any existing interval first
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+    }
 
-    if (shouldPoll) {
-      // Clear any existing interval
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-      }
-
-      // Set up polling interval
+    // Wait for loading to complete before starting poll
+    if (!loading) {
       pollingIntervalRef.current = setInterval(async () => {
         await fetchConversations(false)
       }, 30000) // 30 seconds
+    }
 
-      return () => {
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current)
-        }
-      }
-    } else {
-      // Clear interval if we shouldn't poll
+    return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
         pollingIntervalRef.current = null
       }
     }
-  }, [activeTab, status, loading, fetchConversations])
+  }, [activeTab, status, session?.user?.id, loading, fetchConversations])
 
   // Reset audio playing state when playingThreadId changes
   useEffect(() => {

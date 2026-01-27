@@ -23,6 +23,7 @@ model User {
   conversations     ConversationParticipant[]
   friends           Friend[] @relation("UserFriends")
   friendOf          Friend[] @relation("UserFriendOf")
+  pushSubscriptions PushSubscription[]
 }
 
 model Conversation {
@@ -76,4 +77,19 @@ model Friend {
   @@index([userId])
   @@index([friendId])
   @@index([friendId, status])
+}
+
+model PushSubscription {
+  id          String   @id @default(cuid())
+  userId      String
+  endpoint    String
+  p256dh      String   // Public key
+  auth        String   // Auth secret
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, endpoint])
+  @@index([userId])
 }

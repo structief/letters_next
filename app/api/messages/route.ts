@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { transcribeAudio, summarizeText } from '@/lib/transcription'
+import { sendMessageNotification } from '@/lib/push-notifications'
 
 export async function GET(request: Request) {
   try {
@@ -152,6 +153,11 @@ export async function POST(request: Request) {
     processTranscriptionAsync(message.id, audioUrl).catch((error) => {
       // Log errors but don't fail the request
       console.error('Error processing transcription asynchronously:', error)
+    })
+
+    // Send push notification to receiver (fire-and-forget)
+    sendMessageNotification(receiverId, message.sender.username).catch((error) => {
+      console.error('Error sending push notification:', error)
     })
 
     return NextResponse.json({ message }, { status: 201 })

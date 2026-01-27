@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { sendFriendRequestNotification } from '@/lib/push-notifications'
 
 // GET - List all friends and pending requests
 export async function GET(request: Request) {
@@ -252,8 +253,18 @@ export async function POST(request: Request) {
             username: true,
             email: true,
           }
+        },
+        user: {
+          select: {
+            username: true
+          }
         }
       }
+    })
+
+    // Send push notification to receiver (fire-and-forget)
+    sendFriendRequestNotification(friendId, friend.user.username).catch((error) => {
+      console.error('Error sending push notification:', error)
     })
 
     return NextResponse.json({
