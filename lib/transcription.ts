@@ -87,11 +87,11 @@ export async function summarizeText(text: string): Promise<string> {
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // Cost-effective model
+      model: 'gpt-5-nano', // Cost-effective model
       messages: [
         {
           role: 'system',
-          content: 'Summarize this voice message in one or two short sentences (maximum 15 words in total). Use short sentences and leave out any words that are not essential to the summary. Use the original language of the transcription. Keep it concise and capture the main point.'
+          content: 'Summarize this voice message in one or two short sentences (maximum 10 words in total). Use short phrases and leave out any words that are not essential to the summary. Use the original language of the transcription. Keep it concise and capture the main point. Write in first person.'
         },
         {
           role: 'user',
