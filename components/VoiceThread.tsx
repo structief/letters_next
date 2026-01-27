@@ -1285,7 +1285,16 @@ export default function VoiceThread({
               </span>
             ) : null}
             {conversation.lastMessage && (
-              <span>{formatTimeAgo(conversation.lastMessage.createdAt)}</span>
+              <span>
+                {formatTimeAgo(conversation.lastMessage.createdAt)}
+                {' '}
+                {conversation.lastMessage.senderId === session?.user?.id ? (
+                  // Message sent by me - show if receiver has listened
+                  <span style={{ fontSize: '9px', opacity: 0.7 }}>
+                    {conversation.lastMessage.isRead ? '(heard)' : '(unheard)'}
+                  </span>
+                ) : (<></>)}
+              </span>
             )}
           </div>
         </>
