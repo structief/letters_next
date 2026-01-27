@@ -96,6 +96,67 @@ export default function VoiceThread({
   const skippedMessagesRef = useRef<Set<string>>(new Set()) // Track messages we've skipped due to 404
   const [messageTranscriptions, setMessageTranscriptions] = useState<Map<string, string | null>>(new Map()) // Track transcriptions for polling updates
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map()) // Track polling intervals
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null) // Screen wake lock to prevent screen from turning off
+
+  // Request screen wake lock to prevent screen from turning off during playback
+  const requestWakeLock = useCallback(async () => {
+    // Check if Wake Lock API is supported
+    if ('wakeLock' in navigator && navigator.wakeLock) {
+      try {
+        // Release existing wake lock if any
+        if (wakeLockRef.current) {
+          try {
+            await wakeLockRef.current.release()
+          } catch {
+            // Ignore errors when releasing
+          }
+        }
+        
+        const wakeLock = await navigator.wakeLock.request('screen')
+        wakeLockRef.current = wakeLock
+        
+        // Handle wake lock release (e.g., when tab becomes inactive)
+        wakeLock.addEventListener('release', () => {
+          wakeLockRef.current = null
+          // If still playing, try to re-acquire the wake lock
+          if (isAudioPlaying && isPlaying && !pauseAudio) {
+            requestWakeLock()
+          }
+        })
+      } catch (error) {
+        // Wake lock request failed (e.g., user denied permission or not supported)
+        // Silently fail - this is a nice-to-have feature
+        wakeLockRef.current = null
+      }
+    }
+  }, [isAudioPlaying, isPlaying, pauseAudio])
+
+  // Release screen wake lock
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release()
+        wakeLockRef.current = null
+      } catch (error) {
+        console.log('Wake lock release failed:', error)
+        wakeLockRef.current = null
+      }
+    }
+  }, [])
+
+  // Manage wake lock based on audio playback state
+  useEffect(() => {
+    if (isAudioPlaying && isPlaying && !pauseAudio) {
+      requestWakeLock()
+    } else {
+      releaseWakeLock()
+    }
+
+    // Cleanup on unmount
+    return () => {
+      releaseWakeLock()
+    }
+  }, [isAudioPlaying, isPlaying, pauseAudio, requestWakeLock, releaseWakeLock])
 
   // Set waveform from stored data or generate fallback
   useEffect(() => {
