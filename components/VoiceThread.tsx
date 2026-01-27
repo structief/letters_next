@@ -1125,7 +1125,7 @@ export default function VoiceThread({
         />
       )}
       <div className="user-info">
-        <div className={`avatar ${displayState === 'mine' ? 'mine-avatar' : ''}`}>
+        <div className={`avatar ${displayState === 'mine' ? 'mine-avatar' : ''} ${displayState !== 'mine' && conversation.unreadCount === 0 ? 'orange-outlined' : ''}`}>
           {displayState === 'new' && conversation.unreadCount > 0 && !isPlaying && (
             <div className="avatar-badge">{conversation.unreadCount}</div>
           )}

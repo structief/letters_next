@@ -209,6 +209,7 @@ header {
   animation: soft-pulse 3s ease-in-out infinite;
 }
 
+
 /* Mine message state - light grey */
 .voice-thread.mine .avatar,
 .voice-thread.mine .mine-avatar {
@@ -216,6 +217,12 @@ header {
   border: 1px solid var(--filament-tension);
   opacity: 0.6;
   animation: none;
+}
+
+/* Orange outlined circle for listened messages (not mine, all read) */
+.voice-thread .avatar.orange-outlined {
+  background: transparent;
+  border: 1px solid var(--filament-accent);
 }
 
 .voice-thread:not([data-avatar="accent"]):not(.mine) .avatar {
