@@ -99,7 +99,7 @@ export async function summarizeText(text: string): Promise<string> {
         }
       ],
       temperature: 0.7,
-      max_tokens: 500,
+      max_completion_tokens: 500,
     })
 
     const summary = response.choices[0]?.message?.content?.trim() || ''
