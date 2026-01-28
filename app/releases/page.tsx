@@ -1,51 +1,11 @@
-import { execSync } from 'child_process'
 import Link from 'next/link'
-
-interface Commit {
-  hash: string
-  date: string
-  message: string
-  author: string
-}
-
-async function getCommits(): Promise<Commit[]> {
-  try {
-    const gitLog = execSync(
-      'git log --pretty=format:"%H%x09%ai%x09%s%x09%an" --date=iso -50',
-      { encoding: 'utf-8', cwd: process.cwd() }
-    )
-
-    return gitLog
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const parts = line.split('\t')
-        if (parts.length < 4) return null
-        const [hash, date, message, author] = parts
-        return {
-          hash: hash.substring(0, 7),
-          date: new Date(date).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-          }),
-          message,
-          author,
-        }
-      })
-      .filter((commit): commit is Commit => commit !== null)
-  } catch (error) {
-    console.error('Error fetching git commits:', error)
-    return []
-  }
-}
+import { getCommits } from '@/app/api/releases/route'
 
 export default async function ReleasesPage() {
-  const commits = await getCommits()
+  const commits = getCommits()
 
   return (
-    <div className="landing-container" style={{ height: '100vh', height: '100dvh', overflowY: 'auto' }}>
+    <div className="landing-container" style={{ height: '100dvh', overflowY: 'auto' }}>
       <div className="landing-content" style={{ maxWidth: '600px', alignItems: 'flex-start', justifyContent: 'flex-start', flex: 'none', margin: 0 }}>
         <div style={{ width: '100%', paddingBottom: '48px' }}>
           <Link 
