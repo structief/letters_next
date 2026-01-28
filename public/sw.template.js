@@ -1,7 +1,6 @@
-// AUTO-GENERATED FILE: do not edit directly.
-// Edit public/sw.template.js instead and run scripts/generate-sw.js.
 // Service Worker for PWA notifications
-const CACHE_NAME = 'lttrs-v2'
+// CACHE_VERSION will be replaced at deploy time to force cache invalidation
+const CACHE_NAME = 'lttrs-__CACHE_VERSION__'
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {
@@ -120,3 +119,4 @@ self.addEventListener('message', (event) => {
     )
   }
 })
+

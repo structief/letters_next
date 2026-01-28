@@ -22,6 +22,9 @@ npx prisma migrate deploy
 echo "🏗️  Building application..."
 npm run build
 
+echo "🧱 Generating service worker with fresh cache version..."
+node scripts/generate-sw.js
+
 echo "🔄 Restarting application..."
 pm2 restart letters-app || pm2 start pm2.config.js
 
