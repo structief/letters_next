@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { getCommits } from '@/app/api/releases/route'
+import { getCommits } from '@/lib/git-commits'
 
 export default async function ReleasesPage() {
   const commits = getCommits()
