@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSession } from 'next-auth/react'
-import { showBrowserNotification } from '@/lib/notifications'
-
 interface TabNavigationProps {
   activeTab: string
   setActiveTab: (tab: string) => void
@@ -30,46 +28,12 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
         const data = await response.json()
         const newPendingRequests = data.pendingRequests || 0
         const newUnreadMessages = data.unreadMessages || 0
-        
-        // Only show notifications after initial load
-        if (!isInitialLoadRef.current) {
-          const prevPending = previousCountsRef.current.pendingRequests
-          const prevUnread = previousCountsRef.current.unreadMessages
-          
-          // Check for new friend requests
-          if (newPendingRequests > prevPending) {
-            const newRequestsCount = newPendingRequests - prevPending
-            const message = newRequestsCount === 1 
-              ? 'You have a new friend request' 
-              : `You have ${newRequestsCount} new friend requests`
-            
-            showBrowserNotification('New Friend Request', {
-              body: message,
-              tag: 'friend-request',
-              url: '/app?tab=orbit',
-              requireInteraction: false,
-            })
-          }
-          
-          // Check for new messages
-          if (newUnreadMessages > prevUnread) {
-            const newMessagesCount = newUnreadMessages - prevUnread
-            const message = newMessagesCount === 1 
-              ? 'You have a new message' 
-              : `You have ${newMessagesCount} new messages`
-            
-            showBrowserNotification('New Message', {
-              body: message,
-              tag: 'new-message',
-              url: '/app?tab=friends',
-              requireInteraction: false,
-            })
-          }
-        } else {
-          // Mark initial load as complete after first fetch
+
+        // Mark initial load as complete after first successful fetch
+        if (isInitialLoadRef.current) {
           isInitialLoadRef.current = false
         }
-        
+
         setPendingRequests(newPendingRequests)
         setUnreadMessages(newUnreadMessages)
         previousCountsRef.current = {
