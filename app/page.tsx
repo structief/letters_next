@@ -39,6 +39,10 @@ export default async function Home() {
             © {currentYear} Structief. All rights reserved.
           </p>
           <div className="landing-footer-links">
+            <Link href="/releases" className="landing-footer-link">
+              Releases
+            </Link>
+            <span className="landing-footer-separator">•</span>
             <span className="landing-footer-link landing-footer-link-disabled">
               Privacy Policy
             </span>
