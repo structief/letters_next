@@ -17,6 +17,7 @@ interface Conversation {
     duration: number
     waveform?: number[] | null
     transcription?: string | null
+    transcriptionSummaryLong?: string | null
     senderId: string
     isRead: boolean
     sender: {
@@ -36,6 +37,7 @@ interface Message {
   duration: number
   waveform?: number[] | null
   transcription?: string | null
+  transcriptionSummaryLong?: string | null
   senderId: string
   receiverId?: string
   isRead: boolean
@@ -94,7 +96,8 @@ export default function VoiceThread({
   const [waveformLoadingProgress, setWaveformLoadingProgress] = useState<number>(0) // 0-1, tracks loading progress for waveform bars
   const loadingProgressIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const skippedMessagesRef = useRef<Set<string>>(new Set()) // Track messages we've skipped due to 404
-  const [messageTranscriptions, setMessageTranscriptions] = useState<Map<string, string | null>>(new Map()) // Track transcriptions for polling updates
+  const [messageTranscriptions, setMessageTranscriptions] = useState<Map<string, string | null>>(new Map()) // Short summary for list (polling updates)
+  const [messageTranscriptionLongs, setMessageTranscriptionLongs] = useState<Map<string, string | null>>(new Map()) // Long summary for playback (polling updates)
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map()) // Track polling intervals
   const wakeLockRef = useRef<WakeLockSentinel | null>(null) // Screen wake lock to prevent screen from turning off
   const [isDragging, setIsDragging] = useState(false)
@@ -824,15 +827,22 @@ export default function VoiceThread({
           if (response.ok) {
             const data = await response.json()
             const transcription = data.message?.transcription ?? null
-            
+            const longSummary = data.message?.transcriptionSummaryLong ?? null
+
             if (transcription) {
-              // Update local state with transcription
               setMessageTranscriptions(prev => {
                 const next = new Map(prev)
                 next.set(id, transcription)
                 return next
               })
-              
+              if (longSummary !== undefined) {
+                setMessageTranscriptionLongs(prev => {
+                  const next = new Map(prev)
+                  next.set(id, longSummary)
+                  return next
+                })
+              }
+
               // Stop polling for this message
               const interval = pollingIntervalsRef.current.get(id)
               if (interval) {
@@ -1228,13 +1238,20 @@ export default function VoiceThread({
        (!displayMessage.isRead && 'receiverId' in displayMessage && displayMessage.receiverId === session?.user?.id ? 'new' : 'listened'))
     : messageState
 
-  // Get transcription from local state (polling updates) or message
+  // Get short summary (list preview) from local state (polling updates) or message
   const getTranscription = (message: typeof displayMessage) => {
     if (!message) return null
     return messageTranscriptions.get(message.id) ?? message.transcription ?? null
   }
 
+  // Get long summary (playback read-along) from local state or message
+  const getLongSummary = (message: typeof displayMessage) => {
+    if (!message) return null
+    return messageTranscriptionLongs.get(message.id) ?? message.transcriptionSummaryLong ?? null
+  }
+
   const transcription = getTranscription(displayMessage)
+  const longSummary = getLongSummary(displayMessage)
   
   // Check if message is recent (less than 2 minutes old) and has no transcription
   const isRecentMessage = displayMessage 
@@ -1494,6 +1511,11 @@ export default function VoiceThread({
               {previewText}
             </div>
           </div>
+          {isPlaying && longSummary && (
+            <div className="transcription-summary">
+              {longSummary}
+            </div>
+          )}
           {isPlaying && totalDuration > 0 && (
             <div className="progress-bar-container">
               <div className="progress-bar">

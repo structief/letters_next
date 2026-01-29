@@ -350,6 +350,22 @@ header {
   opacity: 0.4;
 }
 
+.transcription-summary {
+  margin-top: 12px;
+  padding-left: 20px;
+  padding-right: 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--filament-tension);
+  opacity: 0.7;
+  max-height: 4.5em;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.transcription-summary::-webkit-scrollbar {
+  display: none;
+}
+
 .meta-data {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;

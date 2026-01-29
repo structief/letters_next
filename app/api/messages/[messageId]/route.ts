@@ -75,11 +75,18 @@ export async function PATCH(
     const resolvedParams = await Promise.resolve(params)
     const { messageId } = resolvedParams
 
-    const { transcription } = await request.json()
+    const body = await request.json()
+    const { transcription, transcriptionSummaryLong } = body
 
     if (typeof transcription !== 'string' && transcription !== null) {
       return NextResponse.json(
         { error: 'transcription must be a string or null' },
+        { status: 400 }
+      )
+    }
+    if (transcriptionSummaryLong !== undefined && typeof transcriptionSummaryLong !== 'string' && transcriptionSummaryLong !== null) {
+      return NextResponse.json(
+        { error: 'transcriptionSummaryLong must be a string or null' },
         { status: 400 }
       )
     }
@@ -98,12 +105,13 @@ export async function PATCH(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Update message transcription
+    const updateData: { transcription?: string | null; transcriptionSummaryLong?: string | null } = {}
+    if (transcription !== undefined) updateData.transcription = transcription ? transcription.trim() : null
+    if (transcriptionSummaryLong !== undefined) updateData.transcriptionSummaryLong = transcriptionSummaryLong ? transcriptionSummaryLong.trim() : null
+
     const updatedMessage = await prisma.message.update({
       where: { id: messageId },
-      data: {
-        transcription: transcription ? transcription.trim() : null,
-      },
+      data: updateData,
       include: {
         sender: {
           select: {

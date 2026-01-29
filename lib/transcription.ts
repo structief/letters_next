@@ -65,53 +65,76 @@ export async function transcribeAudio(audioUrl: string): Promise<string> {
   }
 }
 
+export type TranscriptionSummaries = {
+  shortSummary: string
+  longSummary: string
+}
+
 /**
- * Summarize text using OpenAI Chat API
- * @param text - Text to summarize
- * @returns Summarized text or original text on error
+ * Summarize transcription into a short (list) and long (playback) summary using OpenAI Chat API.
+ * @param text - Full transcription text
+ * @returns shortSummary for friends list (max ~10 words), longSummary for reading while playing (2-4 sentences)
  */
-export async function summarizeText(text: string): Promise<string> {
+export async function summarizeTranscription(text: string): Promise<TranscriptionSummaries> {
   if (!text || text.trim().length === 0) {
-    return ''
+    return { shortSummary: '', longSummary: '' }
   }
 
-  // If text is already short, return as-is
-  if (text.length < 100) {
-    return text.trim()
+  const trimmed = text.trim()
+  if (trimmed.length < 100) {
+    return { shortSummary: trimmed, longSummary: trimmed }
   }
 
   if (!process.env.OPENAI_API_KEY) {
     console.error('OPENAI_API_KEY not configured')
-    return text.trim()
+    return { shortSummary: trimmed, longSummary: trimmed }
   }
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-5-nano', // Cost-effective model
+      model: 'gpt-5-nano',
       messages: [
         {
           role: 'system',
-          content: 'Summarize this voice message in one or two short sentences (maximum 10 words in total). Use short phrases and leave out any words that are not essential to the summary. Use the original language of the transcription. Keep it concise and capture the main point. Write in first person.'
+          content: `You summarize voice message transcriptions. Reply with valid JSON only, no other text, in this exact shape:
+{"short":"...","long":"..."}
+
+Rules:
+- short: One short phrase or sentence, maximum 10 words total. For the friends list preview. Use the original language. First person. Essential words only.
+- long: A cleaned up version of the entire transcript. Correct typos, words that seem out of place and punctuation. It's for reading while the message plays, so stay as close to the original transcript as possible. Use the original language. First person. Include main points and context.
+- Use the same language as the transcription.`
         },
         {
           role: 'user',
-          content: `Transcription:\n\n${text}`
+          content: `Transcription:\n\n${trimmed}`
         }
       ],
-      max_completion_tokens: 500,
+      max_completion_tokens: 400,
     })
 
-    const summary = response.choices[0]?.message?.content?.trim() || ''
-    
-    // Fallback to original if summary is too long or empty
-    if (summary.length > 150 || summary.length === 0) {
-      return text.trim()
-    }
+    const raw = response.choices[0]?.message?.content?.trim() || ''
+    const parsed = raw.replace(/^```json?\s*|\s*```$/g, '').trim()
+    const obj = JSON.parse(parsed) as { short?: string; long?: string }
+    const shortSummary = typeof obj.short === 'string' && obj.short.length > 0
+      ? obj.short.trim().slice(0, 150)
+      : trimmed.slice(0, 150)
+    const longSummary = typeof obj.long === 'string' && obj.long.length > 0
+      ? obj.long.trim().slice(0, 800)
+      : trimmed.slice(0, 800)
 
-    return summary
+    return { shortSummary, longSummary }
   } catch (error) {
     console.error('Summarization error:', error)
-    // Fallback to original text if summarization fails
-    return text.trim()
+    const fallback = trimmed.slice(0, 150)
+    return { shortSummary: fallback, longSummary: trimmed.slice(0, 800) }
   }
+}
+
+/**
+ * Short summary only (for backward compatibility).
+ * @deprecated Prefer summarizeTranscription when both short and long are needed.
+ */
+export async function summarizeText(text: string): Promise<string> {
+  const { shortSummary } = await summarizeTranscription(text)
+  return shortSummary
 }

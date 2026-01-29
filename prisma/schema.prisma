@@ -50,7 +50,8 @@ model Message {
   audioUrl       String
   duration       Int          // Duration in seconds
   waveform       Json?        // Array of amplitude values for visualization
-  transcription  String?      // Optional transcription
+  transcription           String?      // Short summary for list preview
+  transcriptionSummaryLong String?      // Longer summary shown while playing
   senderId       String
   receiverId     String
   conversationId String

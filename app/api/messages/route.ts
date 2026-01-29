@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { transcribeAudio, summarizeText } from '@/lib/transcription'
+import { transcribeAudio, summarizeTranscription } from '@/lib/transcription'
 import { sendMessageNotification } from '@/lib/push-notifications'
 
 export async function GET(request: Request) {
@@ -184,15 +184,15 @@ async function processTranscriptionAsync(messageId: string, audioUrl: string): P
       return
     }
 
-    // Step 2: Summarize transcription
-    const summary = await summarizeText(fullTranscription)
+    // Step 2: Summarize transcription (short for list, long for playback)
+    const { shortSummary, longSummary } = await summarizeTranscription(fullTranscription)
 
-    // Step 3: Update message with summary
-    // Directly update the database (more efficient than HTTP request)
+    // Step 3: Update message with both summaries
     await prisma.message.update({
       where: { id: messageId },
       data: {
-        transcription: summary || fullTranscription,
+        transcription: shortSummary || fullTranscription.slice(0, 150),
+        transcriptionSummaryLong: longSummary || fullTranscription.slice(0, 800) || null,
       }
     })
 
