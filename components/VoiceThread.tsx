@@ -1511,11 +1511,6 @@ export default function VoiceThread({
               {previewText}
             </div>
           </div>
-          {isPlaying && longSummary && (
-            <div className="transcription-summary">
-              {longSummary}
-            </div>
-          )}
           {isPlaying && totalDuration > 0 && (
             <div className="progress-bar-container">
               <div className="progress-bar">
@@ -1600,6 +1595,11 @@ export default function VoiceThread({
               </>
             )}
           </div>
+          {isPlaying && longSummary && (
+            <div className="transcription-summary">
+              {longSummary}
+            </div>
+          )}
         </>
       )}
       {!conversation.lastMessage && (
