@@ -166,6 +166,44 @@ export default function VoiceThread({
     }
   }, [isAudioPlaying, isPlaying, pauseAudio, requestWakeLock, releaseWakeLock])
 
+  // Manage Media Session API to signal playback state to Android/OS
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) {
+      return // Media Session API not supported
+    }
+
+    const mediaSession = navigator.mediaSession
+
+    // Determine which message is currently playing/displayed
+    const currentDisplayMessage = isPlaying && allMessages.length > 0 && currentMessageIndex < allMessages.length
+      ? allMessages[currentMessageIndex]
+      : conversation.lastMessage
+
+    if (isAudioPlaying && isPlaying && !pauseAudio && currentDisplayMessage) {
+      // Set metadata and playback state to "playing"
+      mediaSession.metadata = new MediaMetadata({
+        title: `Voice message from ${currentDisplayMessage.sender.username}`,
+        artist: 'Letters',
+      })
+      mediaSession.playbackState = 'playing'
+    } else {
+      // Set playback state to "none" to signal that playback has stopped
+      mediaSession.playbackState = 'none'
+      // Clear metadata when not playing
+      if (!isPlaying) {
+        mediaSession.metadata = null
+      }
+    }
+
+    // Cleanup: ensure playback state is cleared when component unmounts or playback stops
+    return () => {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'none'
+        navigator.mediaSession.metadata = null
+      }
+    }
+  }, [isAudioPlaying, isPlaying, pauseAudio, allMessages, currentMessageIndex, conversation.lastMessage])
+
   // Set waveform from stored data or generate fallback
   useEffect(() => {
     const messageToUse = isPlaying && allMessages.length > 0 && currentMessageIndex < allMessages.length
@@ -449,6 +487,9 @@ export default function VoiceThread({
       if (audioRef.current) {
         audioRef.current.pause()
         audioRef.current.currentTime = 0
+        // Clear source to signal to Android/OS that playback has stopped
+        audioRef.current.src = ''
+        audioRef.current.load()
         setIsAudioPlaying(false)
       }
       if (progressIntervalRef.current) {
@@ -461,6 +502,11 @@ export default function VoiceThread({
       }
       setHasFinishedPlaying(false)
       setActualMessageDuration(null) // Reset when stopping
+      return
+    }
+
+    // Don't restart playback when we've already finished the last message (stay on screen, no repeat)
+    if (hasFinishedPlaying) {
       return
     }
 
@@ -748,7 +794,7 @@ export default function VoiceThread({
         animationFrameRef.current = null
       }
     }
-  }, [isPlaying, pauseAudio, allMessages, currentMessageIndex, conversation.lastMessage, session?.user?.id, markAsRead, loadedMessages, loadingMessages, handle404Error, onStop])
+  }, [isPlaying, pauseAudio, hasFinishedPlaying, allMessages, currentMessageIndex, conversation.lastMessage, session?.user?.id, markAsRead, loadedMessages, loadingMessages, handle404Error, onStop])
 
   // Handle stopping playback
   useEffect(() => {
@@ -756,6 +802,9 @@ export default function VoiceThread({
       if (audioRef.current) {
         audioRef.current.pause()
         audioRef.current.currentTime = 0
+        // Clear source to signal to Android/OS that playback has stopped
+        audioRef.current.src = ''
+        audioRef.current.load()
       }
       setIsAudioPlaying(false)
       
@@ -936,6 +985,15 @@ export default function VoiceThread({
       setHasFinishedPlaying(true)
       setCurrentTime(totalDuration > 0 ? totalDuration : (conversation.lastMessage?.duration || 0))
       
+      // Properly stop audio to signal Android/OS that playback has finished
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+        // Clear source to signal to OS that playback has stopped
+        audioRef.current.src = ''
+        audioRef.current.load()
+      }
+      
       // Clear progress interval
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
@@ -962,6 +1020,15 @@ export default function VoiceThread({
       setHasFinishedPlaying(true)
       setCurrentTime(totalDuration)
       
+      // Properly stop audio to signal Android/OS that playback has finished
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+        // Clear source to signal to OS that playback has stopped
+        audioRef.current.src = ''
+        audioRef.current.load()
+      }
+      
       // Clear progress interval
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
@@ -982,6 +1049,13 @@ export default function VoiceThread({
         markAsRead(currentMessage.id)
       }
       
+      // Move to next message - don't clear source, just pause briefly
+      // The playback effect will handle loading the next message
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+      }
+      
       // Move to next message
       setCurrentMessageIndex(prev => prev + 1)
     } else {
@@ -992,6 +1066,15 @@ export default function VoiceThread({
       setIsAudioPlaying(false)
       setHasFinishedPlaying(true)
       setCurrentTime(totalDuration) // Set to end so progress bar shows 100%
+      
+      // Properly stop audio to signal Android/OS that playback has finished
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+        // Clear source to signal to OS that playback has stopped
+        audioRef.current.src = ''
+        audioRef.current.load()
+      }
       
       // Clear progress interval
       if (progressIntervalRef.current) {
