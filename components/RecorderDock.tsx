@@ -181,10 +181,27 @@ export default function RecorderDock({
           const blobUrl = URL.createObjectURL(audioBlob)
           audio.src = blobUrl
           
+          // Detect audio format for better fallback estimation
+          const isIOSAudio = audioBlob.type.includes('mp4') || audioBlob.type.includes('m4a') || 
+                            audioBlob.type.includes('aac')
+          
           const cleanup = () => {
             URL.revokeObjectURL(blobUrl)
             audio.removeEventListener('loadedmetadata', handleLoaded)
             audio.removeEventListener('error', handleError)
+          }
+          
+          const estimateDuration = () => {
+            // Format-specific estimation:
+            // WebM/Opus: ~1KB per second at 32kbps
+            // M4A/AAC (iOS): ~15-20KB per second at typical bitrates
+            if (isIOSAudio) {
+              // Use 15KB per second for iOS audio files (more conservative)
+              return Math.max(1, Math.floor(audioBlob.size / 15000))
+            } else {
+              // WebM/Opus estimation
+              return Math.max(1, Math.floor(audioBlob.size / 1000))
+            }
           }
           
           const handleLoaded = () => {
@@ -195,9 +212,8 @@ export default function RecorderDock({
           
           const handleError = () => {
             cleanup()
-            // Fallback: estimate duration from blob size (rough approximation)
-            // WebM/Opus is roughly 1KB per second at 32kbps
-            const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 1000))
+            // Fallback: estimate duration from blob size (format-aware)
+            const estimatedDuration = estimateDuration()
             resolve(estimatedDuration)
           }
           
@@ -207,14 +223,15 @@ export default function RecorderDock({
           // Start loading
           audio.load()
           
-          // Timeout after 5 seconds
+          // Timeout: longer for iOS files as they may take more time to load metadata
+          const timeoutDuration = isIOSAudio ? 10000 : 5000
           setTimeout(() => {
             if (audio.readyState < 2) { // HAVE_CURRENT_DATA
               cleanup()
-              const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 1000))
+              const estimatedDuration = estimateDuration()
               resolve(estimatedDuration)
             }
-          }, 5000)
+          }, timeoutDuration)
         }),
         // Generate waveform from audio blob
         generateWaveform(audioBlob, 40).catch((error) => {
