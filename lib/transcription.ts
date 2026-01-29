@@ -98,7 +98,6 @@ export async function summarizeText(text: string): Promise<string> {
           content: `Transcription:\n\n${text}`
         }
       ],
-      temperature: 0.7,
       max_completion_tokens: 500,
     })
 
