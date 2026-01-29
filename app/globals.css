@@ -362,7 +362,6 @@ header {
   overflow-y: auto;
   scrollbar-width: none;
   font-style: italic;
-  font-family: 'JetBrains Mono', monospace;
 }
 .transcription-summary::after, .transcription-summary::before {
   content: '"';
