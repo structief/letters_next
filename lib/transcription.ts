@@ -108,8 +108,7 @@ Rules:
           role: 'user',
           content: `Transcription:\n\n${trimmed}`
         }
-      ],
-      max_completion_tokens: 400,
+      ]
     })
 
     const raw = response.choices[0]?.message?.content?.trim() || ''
