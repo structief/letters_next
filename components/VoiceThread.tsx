@@ -1359,7 +1359,7 @@ export default function VoiceThread({
       className={`voice-thread reveal ${isPlaying ? 'playing' : ''} ${messageState === 'new' ? 'new' : ''} ${messageState === 'mine' ? 'mine' : ''}`}
       style={{ animationDelay: `${animationDelay}s` }}
       onClick={handleClick}
-      data-user={conversation.otherUser.username}
+      data-user={conversation.otherUser.id === session?.user?.id ? 'Memos' : conversation.otherUser.username}
       data-avatar={messageState === 'new' ? 'accent' : messageState === 'mine' ? 'faded' : 'outline'}
     >
       {conversation.lastMessage && (
@@ -1481,9 +1481,9 @@ export default function VoiceThread({
         </div>
         <span className={`username ${displayState === 'mine' ? 'mine-username' : ''}`}>
           {isMine ? (
-            <>You <span className="to-separator">to</span> {conversation.otherUser.username}</>
+            <>You <span className="to-separator">to</span> {conversation.otherUser.id === session?.user?.id ? 'Memos' : conversation.otherUser.username}</>
           ) : (
-            <>{conversation.otherUser.username} <span className="to-separator">to</span> you</>
+            <>{conversation.otherUser.id === session?.user?.id ? 'Memos' : conversation.otherUser.username} <span className="to-separator">to</span> you</>
           )}
         </span>
       </div>

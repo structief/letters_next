@@ -61,10 +61,11 @@ export default function VoiceFeed({ activeTab }: VoiceFeedProps) {
       c => !oldConversationIds.has(c.id || `friend-${c.otherUser.id}`)
     )
     if (newConversationsList.length > 0) {
-      if (newConversationsList.length === 1) {
-        changes.push(`New conversation with ${newConversationsList[0].otherUser.username}`)
-      } else {
-        changes.push(`${newConversationsList.length} new conversations`)
+      const nonMemosNew = newConversationsList.filter(c => c.otherUser.id !== session?.user?.id)
+      if (nonMemosNew.length === 1) {
+        changes.push(`New conversation with ${nonMemosNew[0].otherUser.username}`)
+      } else if (nonMemosNew.length > 1) {
+        changes.push(`${nonMemosNew.length} new conversations`)
       }
     }
 
@@ -83,14 +84,14 @@ export default function VoiceFeed({ activeTab }: VoiceFeedProps) {
         const newLastMessageId = newConv.lastMessage?.id
         
         if (newLastMessageId && newLastMessageId !== oldLastMessageId) {
-          // New message received
-          if (newConv.lastMessage?.senderId !== session?.user?.id) {
+          // New message received (skip notifications for memos/self)
+          if (newConv.lastMessage?.senderId !== session?.user?.id && newConv.otherUser.id !== session?.user?.id) {
             changes.push(`New message from ${newConv.otherUser.username}`)
           }
         }
 
-        // Check for increased unread count
-        if (newConv.unreadCount > oldConv.unreadCount) {
+        // Check for increased unread count (skip in-app notification for memos)
+        if (newConv.unreadCount > oldConv.unreadCount && newConv.otherUser.id !== session?.user?.id) {
           const unreadDiff = newConv.unreadCount - oldConv.unreadCount
           if (unreadDiff === 1) {
             changes.push(`1 unread message from ${newConv.otherUser.username}`)

@@ -107,14 +107,17 @@ export async function POST(request: Request) {
       if (existingConversation) {
         finalConversationId = existingConversation.id
       } else {
-        // Create new conversation
+        // Create new conversation (single participant for self/memos)
+        const isSelf = receiverId === session.user.id
         const newConversation = await prisma.conversation.create({
           data: {
             participants: {
-              create: [
-                { userId: session.user.id },
-                { userId: receiverId }
-              ]
+              create: isSelf
+                ? [{ userId: session.user.id }]
+                : [
+                    { userId: session.user.id },
+                    { userId: receiverId }
+                  ]
             }
           }
         })
@@ -155,10 +158,12 @@ export async function POST(request: Request) {
       console.error('Error processing transcription asynchronously:', error)
     })
 
-    // Send push notification to receiver (fire-and-forget)
-    sendMessageNotification(receiverId, message.sender.username).catch((error) => {
-      console.error('Error sending push notification:', error)
-    })
+    // Send push notification to receiver (skip for self/memos)
+    if (receiverId !== session.user.id) {
+      sendMessageNotification(receiverId, message.sender.username).catch((error) => {
+        console.error('Error sending push notification:', error)
+      })
+    }
 
     return NextResponse.json({ message }, { status: 201 })
   } catch (error) {

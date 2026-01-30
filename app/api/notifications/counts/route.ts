@@ -32,14 +32,15 @@ export async function GET(request: Request) {
 
     const friendIds = friends.map(f => f.friendId)
 
-    // Count unread messages from friends
+    // Count unread messages from friends plus memos (self)
     const unreadMessagesCount = await prisma.message.count({
       where: {
         receiverId: session.user.id,
-        senderId: {
-          in: friendIds
-        },
-        isRead: false
+        isRead: false,
+        OR: [
+          { senderId: { in: friendIds } },
+          { senderId: session.user.id }
+        ]
       }
     })
 

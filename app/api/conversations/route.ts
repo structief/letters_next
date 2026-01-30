@@ -10,7 +10,82 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get all conversations for the user
+    // Ensure memos (self) conversation exists
+    let memosConversation = await prisma.conversation.findFirst({
+      where: {
+        participants: {
+          every: {
+            userId: session.user.id,
+          },
+        },
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+              }
+            }
+          }
+        },
+        messages: {
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1,
+          include: {
+            sender: {
+              select: {
+                id: true,
+                username: true,
+              }
+            }
+          }
+        }
+      }
+    })
+
+    if (!memosConversation) {
+      memosConversation = await prisma.conversation.create({
+        data: {
+          participants: {
+            create: [
+              { userId: session.user.id },
+            ],
+          },
+        },
+        include: {
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                }
+              }
+            }
+          },
+          messages: {
+            orderBy: {
+              createdAt: 'desc'
+            },
+            take: 1,
+            include: {
+              sender: {
+                select: {
+                  id: true,
+                  username: true,
+                }
+              }
+            }
+          }
+        }
+      })
+    }
+
+    // Get all conversations for the user (including memos)
     const conversations = await prisma.conversation.findMany({
       where: {
         participants: {
@@ -57,13 +132,17 @@ export async function GET(request: Request) {
           p => p.userId !== session.user.id
         )?.user
 
-        if (!otherParticipant) return null
+        // Self-conversation (memos): single participant is current user
+        const isMemos = !otherParticipant && conv.participants.length === 1 && conv.participants[0].userId === session.user.id
+        const effectiveOther = otherParticipant ?? (isMemos ? { id: session.user.id, username: session.user.username! } : null)
+
+        if (!effectiveOther) return null
 
         const unreadCount = await prisma.message.count({
           where: {
             conversationId: conv.id,
             receiverId: session.user.id,
-            senderId: otherParticipant.id,
+            senderId: effectiveOther.id,
             isRead: false,
           }
         })
@@ -72,7 +151,7 @@ export async function GET(request: Request) {
           where: {
             conversationId: conv.id,
             receiverId: session.user.id,
-            senderId: otherParticipant.id,
+            senderId: effectiveOther.id,
           }
         })
 
@@ -81,7 +160,7 @@ export async function GET(request: Request) {
           where: {
             conversationId: conv.id,
             receiverId: session.user.id,
-            senderId: otherParticipant.id,
+            senderId: effectiveOther.id,
             isRead: false,
           },
           select: {
@@ -92,7 +171,7 @@ export async function GET(request: Request) {
 
         return {
           id: conv.id,
-          otherUser: otherParticipant,
+          otherUser: effectiveOther,
           lastMessage: conv.messages[0] || null,
           unreadCount,
           totalMessageCount,
@@ -184,14 +263,7 @@ export async function POST(request: Request) {
       )
     }
 
-    if (userId === session.user.id) {
-      return NextResponse.json(
-        { error: 'Cannot create conversation with yourself' },
-        { status: 400 }
-      )
-    }
-
-    // Check if conversation already exists
+    // Check if conversation already exists (or get memos for self)
     const existingConversation = await prisma.conversation.findFirst({
       where: {
         participants: {
@@ -203,7 +275,16 @@ export async function POST(request: Request) {
         }
       },
       include: {
-        participants: true
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+              }
+            }
+          }
+        }
       }
     })
 
@@ -211,14 +292,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ conversation: existingConversation })
     }
 
-    // Create new conversation
+    // Self-conversation (memos): single participant
+    const isSelf = userId === session.user.id
     const conversation = await prisma.conversation.create({
       data: {
         participants: {
-          create: [
-            { userId: session.user.id },
-            { userId }
-          ]
+          create: isSelf
+            ? [{ userId: session.user.id }]
+            : [
+                { userId: session.user.id },
+                { userId }
+              ]
         }
       },
       include: {
