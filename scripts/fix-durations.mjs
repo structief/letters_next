@@ -19,27 +19,37 @@ const prisma = new PrismaClient({ adapter })
 const VOICE_MESSAGES_DIR = join(__dirname, '..', 'public', 'voice-messages')
 const KB = 1024
 
-// Plausible byte-rate ranges (bytes per second) for known audio formats
-const FORMAT_RANGES = {
-  webm: { minBps: 500, maxBps: 50000 },  // Opus 4kbps – 400kbps
-  m4a:  { minBps: 2000, maxBps: 100000 }, // AAC 16kbps – 800kbps
-  aac:  { minBps: 2000, maxBps: 100000 },
-  mp4:  { minBps: 2000, maxBps: 100000 },
+// Typical byte-rate for voice messages (bytes/second), used for cross-validation and estimation
+const TYPICAL_BPS = {
+  webm: 8000,  // Opus ~64kbps
+  m4a:  15000, // AAC ~120kbps
+  aac:  15000,
+  mp4:  15000,
+}
+
+// Hard limits: reject any duration that implies a bitrate outside these bounds
+const FORMAT_LIMITS = {
+  webm: { minBps: 2000, maxBps: 40000 },  // Opus 16kbps – 320kbps
+  m4a:  { minBps: 4000, maxBps: 100000 }, // AAC 32kbps – 800kbps
+  aac:  { minBps: 4000, maxBps: 100000 },
+  mp4:  { minBps: 4000, maxBps: 100000 },
 }
 
 function isPlausible(durationSeconds, fileSize, ext) {
   if (!durationSeconds || durationSeconds <= 0) return false
   const bps = fileSize / durationSeconds
-  const range = FORMAT_RANGES[ext] || FORMAT_RANGES.webm
-  return bps >= range.minBps && bps <= range.maxBps
+  const limits = FORMAT_LIMITS[ext] || FORMAT_LIMITS.webm
+  return bps >= limits.minBps && bps <= limits.maxBps
 }
 
 function estimateDuration(fileSize, ext) {
-  const bps = FORMAT_RANGES[ext]
-  // Use the midpoint of the plausible range as the estimate
-  const estimateBps = bps ? (bps.minBps + bps.maxBps) / 2 : 1000
-  return Math.max(1, Math.round(fileSize / estimateBps))
+  const bps = TYPICAL_BPS[ext] || 8000
+  return Math.max(1, Math.round(fileSize / bps))
 }
+
+// Cross-validate a parsed duration against what we'd expect from file size.
+// If they disagree by more than this factor, the metadata is likely corrupted.
+const MAX_RATIO = 3
 
 async function getDurationFromFfprobe(filepath) {
   try {
@@ -69,21 +79,33 @@ async function getDurationFromMetadata(filepath) {
 
 async function resolveDuration(filepath, ext) {
   const fileSize = statSync(filepath).size
+  const estimate = estimateDuration(fileSize, ext)
 
-  // 1. Try ffprobe (most reliable)
-  let duration = await getDurationFromFfprobe(filepath)
-  if (duration !== null && isPlausible(duration, fileSize, ext)) {
-    return { seconds: Math.max(1, Math.round(duration)), source: 'ffprobe' }
+  // Helper: accept a candidate duration if it's both physically plausible
+  // AND consistent with the file-size estimate
+  const accept = (seconds, source) => {
+    if (!isPlausible(seconds, fileSize, ext)) return null
+    const ratio = seconds / estimate
+    if (ratio > MAX_RATIO || ratio < 1 / MAX_RATIO) return null
+    return { seconds: Math.max(1, Math.round(seconds)), source }
   }
 
-  // 2. Try music-metadata (works without external deps)
-  duration = await getDurationFromMetadata(filepath)
-  if (duration !== null && isPlausible(duration, fileSize, ext)) {
-    return { seconds: Math.max(1, Math.round(duration)), source: 'metadata' }
+  // 1. Try ffprobe (reads container metadata)
+  const ffprobeDur = await getDurationFromFfprobe(filepath)
+  if (ffprobeDur !== null) {
+    const result = accept(ffprobeDur, 'ffprobe')
+    if (result) return result
+  }
+
+  // 2. Try music-metadata (parses headers in JS)
+  const metadataDur = await getDurationFromMetadata(filepath)
+  if (metadataDur !== null) {
+    const result = accept(metadataDur, 'metadata')
+    if (result) return result
   }
 
   // 3. Fall back to size estimation
-  return { seconds: estimateDuration(fileSize, ext), source: 'estimate' }
+  return { seconds: estimate, source: 'estimate' }
 }
 
 async function main() {

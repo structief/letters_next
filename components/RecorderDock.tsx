@@ -207,7 +207,12 @@ export default function RecorderDock({
           const handleLoaded = () => {
             const durationValue = Math.floor(audio.duration)
             cleanup()
-            resolve(durationValue > 0 ? durationValue : 1) // Minimum 1 second
+            if (durationValue > 0 && isFinite(durationValue)) {
+              resolve(durationValue)
+            } else {
+              // iOS Safari may report Infinity at loadedmetadata
+              resolve(estimateDuration())
+            }
           }
           
           const handleError = () => {

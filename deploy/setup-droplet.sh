@@ -23,6 +23,10 @@ sudo apt install -y postgresql postgresql-contrib
 echo "📦 Installing Nginx..."
 sudo apt install -y nginx
 
+# Install FFmpeg (for audio duration detection in db:fix-durations script)
+echo "📦 Installing FFmpeg..."
+sudo apt install -y ffmpeg
+
 # Install PM2 for process management
 echo "📦 Installing PM2..."
 sudo npm install -g pm2
@@ -55,3 +59,6 @@ echo "4. Run: npx prisma migrate deploy"
 echo "5. Run: npm run build"
 echo "6. Set up PM2 and Nginx (see deploy/nginx.conf and deploy/pm2.config.js)"
 echo "7. Start the application with PM2"
+echo ""
+echo "Post-setup:"
+echo "  - Fix legacy audio durations: npm run db:fix-durations -- --dry-run"
