@@ -105,6 +105,55 @@ export default function VoiceThread({
   const [dragMessageIndex, setDragMessageIndex] = useState<number | null>(null) // Message index during drag
   const [dragMessageTime, setDragMessageTime] = useState<number | null>(null) // Time within message during drag
   const waveformContainerRef = useRef<HTMLDivElement | null>(null)
+  const durationPollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Update total duration with actual audio element duration
+  const updateTotalWithActualDuration = useCallback((actualDuration: number) => {
+    if (allMessages.length <= 1) {
+      setTotalDuration(actualDuration)
+    } else if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
+      let total = 0
+      for (let i = 0; i < allMessages.length; i++) {
+        total += i === currentMessageIndex ? actualDuration : allMessages[i].duration
+      }
+      setTotalDuration(total)
+    }
+  }, [allMessages, currentMessageIndex])
+
+  // iOS Safari: audio.duration can be Infinity for streaming audio
+  // and durationchange event may never fire. Poll until finite.
+  useEffect(() => {
+    if (!isPlaying || pauseAudio || hasFinishedPlaying) return
+
+    if (actualMessageDuration !== null) {
+      if (durationPollIntervalRef.current) {
+        clearInterval(durationPollIntervalRef.current)
+        durationPollIntervalRef.current = null
+      }
+      return
+    }
+
+    durationPollIntervalRef.current = setInterval(() => {
+      if (audioRef.current && isPlaying) {
+        const dur = audioRef.current.duration
+        if (dur && isFinite(dur) && dur > 0) {
+          setActualMessageDuration(dur)
+          updateTotalWithActualDuration(dur)
+          if (durationPollIntervalRef.current) {
+            clearInterval(durationPollIntervalRef.current)
+            durationPollIntervalRef.current = null
+          }
+        }
+      }
+    }, 250)
+
+    return () => {
+      if (durationPollIntervalRef.current) {
+        clearInterval(durationPollIntervalRef.current)
+        durationPollIntervalRef.current = null
+      }
+    }
+  }, [isPlaying, pauseAudio, hasFinishedPlaying, actualMessageDuration, updateTotalWithActualDuration])
 
   // Request screen wake lock to prevent screen from turning off during playback
   const requestWakeLock = useCallback(async () => {
@@ -1368,36 +1417,22 @@ export default function VoiceThread({
           preload="none"
           onEnded={handleMessageEnd}
           onLoadedMetadata={() => {
-            // Set total duration when audio loads - use actual duration from audio element
             if (audioRef.current && isPlaying) {
               const actualDuration = audioRef.current.duration
-              // Use actual duration if available and valid
               if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
-                // Store the actual duration for the current message
                 setActualMessageDuration(actualDuration)
-                
-                if (allMessages.length <= 1) {
-                  // Single message - update total duration
-                  setTotalDuration(actualDuration)
-                } else if (allMessages.length > 1 && currentMessageIndex < allMessages.length) {
-                  // Multiple messages - recalculate total with actual duration for current message
-                  const currentMsg = allMessages[currentMessageIndex]
-                  if (currentMsg) {
-                    // Update the current message's duration in our calculation
-                    let total = 0
-                    for (let i = 0; i < allMessages.length; i++) {
-                      if (i === currentMessageIndex) {
-                        total += actualDuration
-                      } else {
-                        total += allMessages[i].duration
-                      }
-                    }
-                    setTotalDuration(total)
-                  }
-                }
+                updateTotalWithActualDuration(actualDuration)
               }
-              // Mark as fully loaded
               setWaveformLoadingProgress(1)
+            }
+          }}
+          onDurationChange={() => {
+            if (audioRef.current && isPlaying) {
+              const actualDuration = audioRef.current.duration
+              if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
+                setActualMessageDuration(actualDuration)
+                updateTotalWithActualDuration(actualDuration)
+              }
             }
           }}
           onProgress={() => {
@@ -1441,15 +1476,11 @@ export default function VoiceThread({
             }
           }}
           onCanPlay={() => {
-            // Ensure audio can actually play
             if (audioRef.current && isPlaying && !pauseAudio) {
-              // Update duration from actual audio element if available
               const actualDuration = audioRef.current.duration
               if (actualDuration && isFinite(actualDuration) && actualDuration > 0) {
                 setActualMessageDuration(actualDuration)
-                if (allMessages.length <= 1) {
-                  setTotalDuration(actualDuration)
-                }
+                updateTotalWithActualDuration(actualDuration)
               }
             }
           }}

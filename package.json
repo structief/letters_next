@@ -9,7 +9,8 @@
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:fix-durations": "node scripts/fix-durations.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.8.1",
@@ -19,6 +20,7 @@
     "@prisma/client": "^7.3.0",
     "@prisma/config": "^7.3.0",
     "bcryptjs": "^2.4.3",
+    "music-metadata": "^11.12.3",
     "next": "^14.2.0",
     "next-auth": "^4.24.5",
     "openai": "^4.28.0",

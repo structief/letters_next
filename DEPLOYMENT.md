@@ -143,7 +143,7 @@ npm run build
 
 ```bash
 sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com -d www.your-domain.com
+sudo certbot --nginx -d lttrs.app -d www.lttrs.app
 ```
 
 This will automatically configure HTTPS and update your Nginx config.
@@ -155,6 +155,59 @@ sudo ufw allow OpenSSH
 sudo ufw allow 'Nginx Full'
 sudo ufw enable
 ```
+
+## Step 10.5: Enable Remote Database Access (For Local Prisma Commands)
+
+To allow local Prisma commands to connect to the online database:
+
+1. **Open PostgreSQL port in firewall:**
+   ```bash
+   sudo ufw allow 5432/tcp
+   ```
+
+2. **Configure PostgreSQL to listen on all interfaces:**
+   ```bash
+   sudo nano /etc/postgresql/*/main/postgresql.conf
+   ```
+   
+   Find the line `#listen_addresses = 'localhost'` and change it to:
+   ```
+   listen_addresses = '*'
+   ```
+
+3. **Allow remote connections in pg_hba.conf:**
+   ```bash
+   sudo nano /etc/postgresql/*/main/pg_hba.conf
+   ```
+   
+   Add this line at the end (replace `YOUR_IP` with your local IP, or use `0.0.0.0/0` for any IP - less secure):
+   ```
+   host    voice_messaging    voice_app_user    0.0.0.0/0    md5
+   ```
+   
+   For better security, restrict to your IP:
+   ```
+   host    voice_messaging    voice_app_user    YOUR_IP/32    md5
+   ```
+
+4. **Restart PostgreSQL:**
+   ```bash
+   sudo systemctl restart postgresql
+   ```
+
+5. **Verify the service is listening:**
+   ```bash
+   sudo netstat -tlnp | grep 5432
+   ```
+   You should see it listening on `0.0.0.0:5432` or `:::5432`
+
+6. **On your local machine, update `.env` with the remote database URL:**
+   ```env
+   DATABASE_URL="postgresql://voice_app_user:your_password@YOUR_DROPLET_IP:5432/voice_messaging?schema=public"
+   ```
+   Replace `YOUR_DROPLET_IP` with your droplet's public IP address.
+
+**Security Note:** For production, consider using a VPN or SSH tunnel instead of exposing PostgreSQL directly. You can also restrict access to specific IPs in step 3.
 
 ## Step 11: Create Uploads Directory
 
@@ -168,25 +221,25 @@ chmod 755 /var/www/letters-app/public/voice-messages
 For future updates, use the deployment script:
 
 ```bash
-cd /var/www/voice-messaging-app
+cd /var/www/letters-app
 chmod +x deploy/deploy.sh
 ./deploy/deploy.sh
 ```
 
 Or manually:
 ```bash
-cd /var/www/voice-messaging-app
+cd /var/www/letters-app
 git pull
 npm install --production
 npx prisma migrate deploy
 npm run build
-pm2 restart voice-messaging-app
+pm2 restart letters-app
 ```
 
 ## Useful Commands
 
-- View logs: `pm2 logs voice-messaging-app`
-- Restart app: `pm2 restart voice-messaging-app`
+- View logs: `pm2 logs letters-app`
+- Restart app: `pm2 restart letters-app`
 - Check status: `pm2 status`
 - Nginx logs: `sudo tail -f /var/log/nginx/error.log`
 - PostgreSQL: `sudo -u postgres psql voice_messaging`
